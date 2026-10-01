@@ -1,0 +1,19 @@
+# секреты и состояние
+.env
+data/
+
+# venv, сборки, кэши
+.venv/
+venv/
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+
+# редакторы и ОС
+.vscode/
+.idea/
+*.swp
+.DS_Store
