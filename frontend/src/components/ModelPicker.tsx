@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
 
 export default function ModelPicker() {
+  const paneId = usePaneId();
   const models = useStore((st) => st.models);
-  const model = useStore((st) => st.model);
+  const model = usePane((p) => p.model, "");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -46,7 +48,7 @@ export default function ModelPicker() {
                 key={m.name}
                 className={m.name === model ? "picker-item active" : "picker-item"}
                 onClick={() => {
-                  useStore.getState().setModel(m.name);
+                  useStore.getState().setModel(paneId, m.name);
                   setOpen(false);
                 }}
               >

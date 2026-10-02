@@ -14,8 +14,25 @@ function fmtTime(ts: number): string {
 
 export default function Sidebar() {
   const sessions = useStore((st) => st.sessions);
-  const activeId = useStore((st) => st.activeSessionId);
-  const turn = useStore((st) => st.turn);
+  // derived as strings so the selectors stay referentially stable
+  const activeId = useStore((st) => st.panes[st.focusedPaneId]?.sessionId ?? null);
+  const openKey = useStore((st) =>
+    Object.values(st.panes)
+      .map((p) => p.sessionId)
+      .filter((x): x is string => !!x)
+      .sort()
+      .join(",")
+  );
+  const streamingKey = useStore((st) =>
+    Object.values(st.panes)
+      .filter((p) => p.turn && !p.turn.done)
+      .map((p) => p.turn!.session_id)
+      .filter((x): x is string => !!x)
+      .sort()
+      .join(",")
+  );
+  const openIds = new Set(openKey ? openKey.split(",") : []);
+  const streamingIds = new Set(streamingKey ? streamingKey.split(",") : []);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
@@ -29,7 +46,10 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <button className="new-chat" onClick={() => useStore.getState().newSession()}>
+      <button
+        className="new-chat"
+        onClick={() => useStore.getState().newSession(useStore.getState().focusedPaneId)}
+      >
         + New chat
       </button>
       <div className="session-list">
@@ -48,13 +68,13 @@ export default function Sidebar() {
           ) : (
             <div
               key={s.id}
-              className={s.id === activeId ? "session active" : "session"}
-              onClick={() => useStore.getState().openSession(s.id)}
+              className={`session${s.id === activeId ? " active" : ""}${openIds.has(s.id) ? " open" : ""}`}
+              onClick={() => useStore.getState().openInFocusedPane(s.id)}
             >
               <span className="title">{s.title}</span>
               <span className="meta">
                 {fmtTime(s.updated_at)}
-                {turn?.session_id === s.id && !turn.done && <span className="dot" />}
+                {streamingIds.has(s.id) && <span className="dot pulse" />}
               </span>
               <div className="actions" onClick={(e) => e.stopPropagation()}>
                 <button
@@ -66,6 +86,20 @@ export default function Sidebar() {
                   }}
                 >
                   ✎
+                </button>
+                <button
+                  title="Open in a new pane"
+                  className="icon"
+                  onClick={() => {
+                    const st = useStore.getState();
+                    const before = st.focusedPaneId;
+                    st.splitPane(before, "row");
+                    const created = useStore.getState().focusedPaneId;
+                    // at the pane limit splitPane is a no-op — don't clobber the open pane
+                    if (created !== before) st.openSession(created, s.id);
+                  }}
+                >
+                  ⧉
                 </button>
                 <a title="Export .md" className="icon" href={api.exportUrl(s.id)}>
                   ↓

@@ -161,7 +161,7 @@ export default function Dashboard() {
                 key={s.id}
                 onClick={() => {
                   useStore.setState({ activeTab: "chat" });
-                  useStore.getState().openSession(s.id);
+                  useStore.getState().openInFocusedPane(s.id);
                 }}
                 className="row-link"
               >

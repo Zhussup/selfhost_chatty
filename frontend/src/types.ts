@@ -58,6 +58,7 @@ export type StreamEvent =
 export interface ChatTurn {
   message_id: string; // "" until meta arrives
   session_id: string;
+  user_text: string; // the prompt just sent — rendered optimistically until the turn is persisted
   think_text: string;
   text: string;
   tools: {

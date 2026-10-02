@@ -1,15 +1,17 @@
 import type { FormEvent, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
+import { usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
 
 export default function Composer() {
+  const paneId = usePaneId();
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const turn = useStore((st) => st.turn);
-  const model = useStore((st) => st.model);
-  const think = useStore((st) => st.think);
-  const useTools = useStore((st) => st.useTools);
-  const busy = useStore((st) => st.busy);
+  const turn = usePane((p) => p.turn, null);
+  const model = usePane((p) => p.model, "");
+  const think = usePane((p) => p.think, null);
+  const useTools = usePane((p) => p.useTools, true);
+  const busy = usePane((p) => p.busy, false);
 
   const streaming = !!turn && !turn.done;
 
@@ -18,7 +20,7 @@ export default function Composer() {
     if (!value || busy || !model) return;
     setText("");
     if (taRef.current) taRef.current.style.height = "auto";
-    useStore.getState().send(value);
+    useStore.getState().send(paneId, value);
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -50,10 +52,9 @@ export default function Composer() {
           onKeyDown={onKeyDown}
           onInput={(e) => autoGrow(e.target as HTMLTextAreaElement)}
           onChange={(e) => setText(e.target.value)}
-          autoFocus
         />
         {streaming ? (
-          <button type="button" className="send stop" onClick={() => useStore.getState().stop()}>
+          <button type="button" className="send stop" onClick={() => useStore.getState().stop(paneId)}>
             Stop
           </button>
         ) : (
@@ -66,7 +67,7 @@ export default function Composer() {
         <button
           type="button"
           className={`pill ${useTools ? "on" : ""}`}
-          onClick={() => useStore.getState().toggleTools()}
+          onClick={() => useStore.getState().toggleTools(paneId)}
           title="Toggle tool calling"
         >
           🛠 tools {useTools ? "on" : "off"}
@@ -74,7 +75,7 @@ export default function Composer() {
         <button
           type="button"
           className={`pill ${think ? "on" : ""}`}
-          onClick={() => useStore.getState().cycleThink()}
+          onClick={() => useStore.getState().cycleThink(paneId)}
           title="Reasoning level (cycles: off → low → medium → high)"
         >
           💭 think: {think ?? "off"}
