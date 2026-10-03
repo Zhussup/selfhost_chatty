@@ -1,5 +1,6 @@
 import { memo } from "react";
 import Markdown from "./Markdown";
+import Icon from "./Icon";
 
 /** Collapsible reasoning block. Open while streaming, collapsed once text starts. */
 const ThinkingBlock = memo(function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
@@ -8,6 +9,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }: { text: stri
   return (
     <details className="thinking" open={active} key={active ? "open" : "closed"}>
       <summary>
+        <Icon name="bulb" size={14} />
         <span className="thinking-label">
           thinking {active && <span className="dot pulse" />}
         </span>

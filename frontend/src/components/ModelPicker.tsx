@@ -2,6 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
+import Icon from "./Icon";
+import type { ModelInfo } from "../types";
+
+function fmtSize(bytes: number): string {
+  if (!bytes) return "";
+  const gb = bytes / 1e9;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.round(bytes / 1e6)} MB`;
+}
+
+function subtitle(m: ModelInfo): string {
+  const size = fmtSize(m.size);
+  return [m.family, size].filter(Boolean).join(" · ") || "model";
+}
 
 export default function ModelPicker() {
   const paneId = usePaneId();
@@ -30,7 +44,7 @@ export default function ModelPicker() {
     <div className="model-picker" ref={ref}>
       <button className="picker-btn" onClick={() => setOpen((v) => !v)}>
         <span className="picker-name">{current ? current.name : model || "loading models…"}</span>
-        <span className="chev">▾</span>
+        <Icon name="chevronDown" size={14} className="chev" />
       </button>
       {open && (
         <div className="picker-menu">
@@ -52,7 +66,15 @@ export default function ModelPicker() {
                   setOpen(false);
                 }}
               >
-                <span>{m.name}</span>
+                <span className="pinfo">
+                  <span className="pname">{m.name}</span>
+                  <span className="picker-sub">{subtitle(m)}</span>
+                </span>
+                {m.name === model && (
+                  <span className="picker-check">
+                    <Icon name="check" size={15} />
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -65,7 +87,7 @@ export default function ModelPicker() {
               });
             }}
           >
-            ⟳ refresh
+            <Icon name="refresh" size={15} /> refresh
           </button>
         </div>
       )}

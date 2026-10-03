@@ -5,7 +5,10 @@ import ThinkingBlock from "./ThinkingBlock";
 import ToolChip, { type ChipData } from "./ToolChip";
 import Composer from "./Composer";
 import ModelPicker from "./ModelPicker";
-import { PaneProvider, usePane } from "./PaneContext";
+import MsgActions from "./MsgActions";
+import Icon from "./Icon";
+import { useTypewriter } from "./useTypewriter";
+import { PaneProvider, usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
 import type { ChatTurn, MessageRow } from "../types";
 
@@ -46,12 +49,33 @@ export default function Pane({ paneId }: { paneId: string }) {
         onPointerDownCapture={() => useStore.getState().focusPane(paneId)}
       >
         <PaneHeader paneId={paneId} />
-        <div className="pane-body">
-          <MessageList />
-          <Composer />
-        </div>
+        <PaneBody />
       </section>
     </PaneProvider>
+  );
+}
+
+/**
+ * Module scope on purpose: defining this inside `Pane` would make a new
+ * component type every render and remount the subtree (losing composer text).
+ *
+ * The child order is fixed — MessageList then the composer's wrapper — so the
+ * empty→non-empty transition only flips a class on `.pane-body` and never
+ * remounts `<Composer>`.
+ */
+function PaneBody() {
+  const sessionId = usePane((p) => p.sessionId, null);
+  const turn = usePane((p) => p.turn, null);
+  const historyLen = usePane((p) => p.history.length, 0);
+  const empty = sessionId === null && !turn && historyLen === 0;
+
+  return (
+    <div className={empty ? "pane-body empty" : "pane-body"}>
+      <MessageList />
+      <div className="composer-wrap">
+        <Composer empty={empty} />
+      </div>
+    </div>
   );
 }
 
@@ -72,10 +96,10 @@ function PaneHeader({ paneId }: { paneId: string }) {
       <span className="pane-title">{title}</span>
       <ModelPicker />
       <button className="icon" title="Split right — Ctrl+Shift+E" onClick={() => split("row")}>
-        ⬌
+        <Icon name="splitV" />
       </button>
       <button className="icon" title="Split down — Ctrl+Shift+O" onClick={() => split("col")}>
-        ⬍
+        <Icon name="splitH" />
       </button>
       <button
         className="icon hide-narrow"
@@ -85,16 +109,21 @@ function PaneHeader({ paneId }: { paneId: string }) {
           focusComposer(useStore.getState().focusedPaneId);
         }}
       >
-        ✕
+        <Icon name="close" />
       </button>
     </div>
   );
 }
 
 function MessageList() {
+  const paneId = usePaneId();
   const sessionId = usePane((p) => p.sessionId, null);
   const turn = usePane((p) => p.turn, null);
   const history = usePane((p) => p.history, EMPTY_HISTORY);
+  const busy = usePane((p) => p.busy, false);
+  // Smooths the streamed answer; owned here (not in StreamingTurn) so the
+  // scroll effect below can track the displayed length as it grows.
+  const displayText = useTypewriter(turn?.text ?? "", !!turn && !turn.done);
   const stick = useRef(true);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -117,11 +146,13 @@ function MessageList() {
   }, [
     history.length,
     history[history.length - 1]?.content,
-    turn?.text,
+    displayText,
     turn?.think_text,
     turn?.tools.length,
     turn?.done,
   ]);
+
+  const lastId = history[history.length - 1]?.id;
 
   return (
     <div className="msg-list" ref={listRef}>
@@ -131,9 +162,15 @@ function MessageList() {
           // assistant rows that exist only to carry tool calls render through the tool rows
           return null;
         }
+        // Only the newest answer can be regenerated — an older one would rerun
+        // the tail exchange instead, which is not what the button promises.
+        const canRetry = m.role === "assistant" && m.id === lastId && !busy && !turn;
         return (
           <div key={m.id}>
-            <Message msg={m} />
+            <Message
+              msg={m}
+              onRetry={canRetry ? () => useStore.getState().retry(paneId) : undefined}
+            />
           </div>
         );
       })}
@@ -142,7 +179,7 @@ function MessageList() {
           <div className="bubble">{turn.user_text}</div>
         </div>
       )}
-      {turn && <StreamingTurn turn={turn} />}
+      {turn && <StreamingTurn turn={turn} text={displayText} />}
     </div>
   );
 }
@@ -153,35 +190,48 @@ function showUserBubble(turn: ChatTurn): boolean {
   return !!turn.user_text && (turn.session_id !== "" || !turn.error);
 }
 
-function StreamingTurn({ turn }: { turn: ChatTurn }) {
-  const waiting =
-    !turn.done && !turn.error && !turn.text && !turn.think_text && turn.tools.length === 0;
+function StreamingTurn({ turn, text }: { turn: ChatTurn; text: string }) {
+  const paneId = usePaneId();
+  const busy = usePane((p) => p.busy, false);
+  // Uses the *displayed* text, so the placeholder holds until the typewriter
+  // has revealed its first characters instead of blinking empty.
+  const waiting = !turn.done && !turn.error && !text && !turn.think_text && turn.tools.length === 0;
   return (
     <div className="msg assistant streaming">
-      {waiting && (
-        <div className="waiting">
-          <span className="spinner sm" /> waiting for the model…
-        </div>
-      )}
-      <ThinkingBlock text={turn.think_text} active={!turn.done} />
-      {turn.tools.map((t) => {
-        const chip: ChipData = {
-          id: t.id,
-          name: t.name,
-          arguments: t.arguments,
-          ok: t.ok,
-          ms: t.ms,
-          result: t.result,
-        };
-        return <ToolChip key={t.id} chip={chip} />;
-      })}
-      <Markdown text={turn.text} />
-      {turn.error && <div className="error-note">{friendlyError(turn.error)}</div>}
-      {turn.usage && (
-        <div className="stamp">
-          {turn.usage.prompt} in + {turn.usage.completion} out tokens{turn.done ? "" : " so far"}
-        </div>
-      )}
+      <div className="msg-avatar">
+        <Icon name="sparkle" size={15} />
+      </div>
+      <div className="msg-main">
+        {waiting && (
+          <div className="waiting">
+            <span className="ldot" />
+            <span className="ldot" />
+            <span className="ldot" />
+          </div>
+        )}
+        <ThinkingBlock text={turn.think_text} active={!turn.done} />
+        {turn.tools.map((t) => {
+          const chip: ChipData = {
+            id: t.id,
+            name: t.name,
+            arguments: t.arguments,
+            ok: t.ok,
+            ms: t.ms,
+            result: t.result,
+          };
+          return <ToolChip key={t.id} chip={chip} />;
+        })}
+        <Markdown text={text} />
+        {turn.error && <div className="error-note">{friendlyError(turn.error)}</div>}
+        {turn.usage && (
+          <div className="stamp">
+            {turn.usage.prompt} in + {turn.usage.completion} out tokens{turn.done ? "" : " so far"}
+          </div>
+        )}
+        {turn.done && !busy && (
+          <MsgActions copyText={turn.text} onRetry={() => useStore.getState().retry(paneId)} />
+        )}
+      </div>
     </div>
   );
 }
@@ -189,10 +239,13 @@ function StreamingTurn({ turn }: { turn: ChatTurn }) {
 function Welcome() {
   return (
     <div className="welcome">
-      <h1>Chat</h1>
+      <div className="welcome-mark">
+        <Icon name="sparkle" size={26} />
+      </div>
+      <h1>How can I help you today?</h1>
       <p>
-        Self-hosted chat on Ollama Cloud. Tools available: web search, page reading, exact math,
-        python, long-term memory.
+        Self-hosted chat on Ollama Cloud. Tools available: web search, page reading, exact
+        math, python, long-term memory.
       </p>
     </div>
   );

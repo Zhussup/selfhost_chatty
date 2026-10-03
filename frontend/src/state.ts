@@ -7,7 +7,7 @@
 
 import { create } from "zustand";
 import { api, streamChat, type ChatRequestBody } from "./api";
-import type { ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
+import type { MessageRow, ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
 import { clearLayout, loadLayout } from "./persist";
 import {
   clamp,
@@ -52,7 +52,8 @@ interface StoreState {
   openSession: (paneId: string, id: string) => Promise<void>;
   openInFocusedPane: (id: string) => Promise<void>;
   newSession: (paneId: string) => void;
-  send: (paneId: string, content: string) => Promise<void>;
+  send: (paneId: string, content: string, opts?: { regenerate?: boolean }) => Promise<void>;
+  retry: (paneId: string) => void;
   stop: (paneId: string) => void;
   setModel: (paneId: string, name: string) => void;
   cycleThink: (paneId: string) => void;
@@ -73,6 +74,16 @@ const firstId = newPaneId();
 function resetPanesForLogout(): Pick<StoreState, "root" | "panes" | "focusedPaneId"> {
   const id = newPaneId();
   return { root: leaf(id), panes: { [id]: makePane(id) }, focusedPaneId: id };
+}
+
+/** History up to and including the last user row — mirrors the backend's
+ *  `_truncate_after_last_user` for `regenerate`, so the stale answer is gone
+ *  as soon as the retry starts instead of lingering until the server refresh. */
+function truncateAfterLastUser(history: MessageRow[]): MessageRow[] {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === "user") return history.slice(0, i + 1);
+  }
+  return history;
 }
 
 function abortAll(): void {
@@ -249,7 +260,7 @@ export const useStore = create<StoreState>((set, get) => {
       patch(paneId, () => ({ sessionId: null, history: [], turn: null, busy: false }));
     },
 
-    send: async (paneId, content) => {
+    send: async (paneId, content, opts) => {
       const st = get();
       const pane = st.panes[paneId];
       if (!pane) return;
@@ -257,18 +268,22 @@ export const useStore = create<StoreState>((set, get) => {
       const model = pane.model || st.models[0]?.name || "";
       if (!model) return;
 
+      const regenerate = opts?.regenerate === true;
       const ctrl = new AbortController();
       abortStore[paneId] = ctrl;
       patch(paneId, () => ({
         turn: {
           message_id: "",
           session_id: "",
-          user_text: content,
+          // On regenerate the user row is already in history, so an optimistic
+          // bubble would echo it twice.
+          user_text: regenerate ? "" : content,
           think_text: "",
           text: "",
           tools: [],
           done: false,
         },
+        history: regenerate ? truncateAfterLastUser(pane.history) : pane.history,
         busy: true,
       }));
 
@@ -351,7 +366,7 @@ export const useStore = create<StoreState>((set, get) => {
         content,
         think: pane.think,
         use_tools: pane.useTools,
-        regenerate: false,
+        regenerate,
       };
 
       try {
@@ -401,6 +416,35 @@ export const useStore = create<StoreState>((set, get) => {
           }
         } else {
           patch(paneId, finish);
+        }
+      }
+    },
+
+    /** Regenerate the last exchange, resuming from wherever the pane left off. */
+    retry: (paneId) => {
+      const pane = get().panes[paneId];
+      if (!pane || pane.busy) return;
+      const turn = pane.turn;
+      if (turn && !turn.done) return; // still streaming
+
+      if (turn) {
+        // A turn kept after a failure. When no `meta` ever arrived the prompt
+        // was never persisted (409 / pre-stream error), so it has to be resent
+        // as a normal message — regenerating would truncate against an older
+        // exchange and the model would answer the wrong prompt.
+        if (!turn.user_text) return;
+        if (turn.session_id === "") get().send(paneId, turn.user_text);
+        else get().send(paneId, turn.user_text, { regenerate: true });
+        return;
+      }
+
+      // History only: the last user row is what the backend truncates after.
+      // It rejects empty content, so retry is unavailable without it.
+      for (let i = pane.history.length - 1; i >= 0; i--) {
+        const m = pane.history[i];
+        if (m.role === "user") {
+          if (m.content) get().send(paneId, m.content, { regenerate: true });
+          return;
         }
       }
     },

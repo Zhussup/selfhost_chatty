@@ -1,12 +1,26 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Login from "./components/Login";
 import Chat from "./components/Chat";
 import Dashboard from "./components/Dashboard";
+import Sidebar from "./components/Sidebar";
+import Icon from "./components/Icon";
 import { useStore } from "./state";
+
+const RAIL_KEY = "chat.rail";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(RAIL_KEY) === "0";
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const booted = useStore((st) => st.booted);
   const loggedIn = useStore((st) => st.loggedIn);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     useStore.getState().boot(); // StrictMode double-run safe (idempotent)
@@ -21,32 +35,40 @@ export default function App() {
   }
   if (!loggedIn) return <Login />;
 
+  const toggleCollapse = () =>
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(RAIL_KEY, next ? "0" : "1");
+      } catch {
+        /* storage may be unavailable */
+      }
+      return next;
+    });
+
+  const appClass = `app${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`;
+
   return (
-    <div className="app">
-      <nav className="tabs">
-        <TabButton tab="chat" label="Chat" />
-        <TabButton tab="stats" label="Stats" />
-        <div className="grow" />
-        <button className="tab quiet" onClick={() => useStore.getState().logout()}>
-          Log out
-        </button>
-      </nav>
+    <div className={appClass}>
+      <Sidebar
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapse}
+        onNavigate={() => setMobileOpen(false)}
+      />
+      <button
+        className="icon mobile-menu"
+        title="Open sidebar"
+        onClick={() => setMobileOpen(true)}
+      >
+        <Icon name="menu" />
+      </button>
+      {mobileOpen && (
+        <div className="scrim" onClick={() => setMobileOpen(false)} aria-hidden="true" />
+      )}
       <main className="content">
         <TabBody />
       </main>
     </div>
-  );
-}
-
-function TabButton({ tab, label }: { tab: "chat" | "stats"; label: string }) {
-  const active = useStore((st) => st.activeTab === tab);
-  return (
-    <button
-      className={active ? "tab active" : "tab"}
-      onClick={() => useStore.setState({ activeTab: tab })}
-    >
-      {label}
-    </button>
   );
 }
 

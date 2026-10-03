@@ -23,7 +23,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <h1>Chat</h1>
+        <h1>chatty</h1>
         <p className="muted">Self-hosted · powered by Ollama Cloud</p>
         <input
           type="password"

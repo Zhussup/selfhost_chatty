@@ -1,5 +1,7 @@
 import { toolChipLabel } from "../api";
 import type { ToolCall } from "../types";
+import Icon from "./Icon";
+import type { IconName } from "./Icon";
 
 export interface ChipData {
   id: string;
@@ -10,23 +12,25 @@ export interface ChipData {
   result: string;
 }
 
-const ICONS: Record<string, string> = {
-  web_search: "🔎",
-  fetch_page: "📃",
-  calc: "🧮",
-  python: "🐍",
-  memory_write: "🧠",
-  memory_list: "🗂",
+const ICONS: Record<string, IconName> = {
+  web_search: "search",
+  fetch_page: "file",
+  calc: "hash",
+  python: "terminal",
+  memory_write: "bulb",
+  memory_list: "list",
 };
 
 export default function ToolChip({ chip }: { chip: ChipData }) {
-  const icon = ICONS[chip.name] ?? "🔧";
+  const icon = ICONS[chip.name] ?? "wrench";
   const running = chip.ok === null;
   const call: ToolCall = { id: chip.id, name: chip.name, arguments: chip.arguments ?? {} };
   return (
     <details className={`tool-chip ${running ? "running" : chip.ok ? "ok" : "fail"}`}>
       <summary>
-        <span className="chip-icon">{icon}</span>
+        <span className="chip-icon">
+          <Icon name={icon} size={14} />
+        </span>
         <span className="chip-label">{running ? `${chip.name} · running…` : toolChipLabel(call)}</span>
         {running ? <span className="dot pulse" /> : <span className={`chip-status ${chip.ok ? "okd" : "err"}`} />}
         <span className="chip-ms">{chip.ms} ms</span>
