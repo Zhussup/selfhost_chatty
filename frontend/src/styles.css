@@ -11,7 +11,7 @@
 :root {
   /* dark fallback for the sliver before the head script runs */
   color-scheme: dark;
-  --bg: #131313;
+  --bg: #0d0d0d;
   --main-bg: #131313;
   --rail-bg: #1a1a1a;
   --rail-hover: #242424;
@@ -54,7 +54,7 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f4f4;
+  --bg: #e8e8e8;
   --main-bg: #ffffff;
   --rail-bg: #f0f0f0;
   --rail-hover: #e8e8e8;
@@ -317,7 +317,11 @@ code {
   height: 100%;
   display: flex;
   min-height: 0;
-  background: var(--main-bg);
+  /* Panels float on a slightly deeper canvas — the gap does the separating,
+     so no rule is drawn against the app edge. */
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg);
 }
 .main {
   flex: 1;
@@ -331,6 +335,9 @@ code {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  background: var(--main-bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden; /* clips the panes to the rounded panel */
 }
 
 /* floating trigger for the off-canvas rail on narrow screens */
@@ -361,7 +368,9 @@ code {
   display: flex;
   flex-direction: column;
   background: var(--rail-bg);
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   transition: width 0.18s ease, transform 0.2s ease;
   overflow: hidden;
 }
@@ -1766,6 +1775,9 @@ details.thinking[open] summary::before {
     transform: translateX(-100%);
     box-shadow: var(--shadow-md);
     background: var(--rail-bg);
+    /* full-bleed drawer, not a floating panel */
+    border: none;
+    border-radius: 0;
   }
   .app.mobile-open .sidebar {
     transform: none;
