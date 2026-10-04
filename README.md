@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="chatty_logo.png" alt="chatty" width="440">
+</p>
+
 # selfhost chat
 
 Минималистичный чат на Ollama Cloud API (ollama.com): стриминг, tool calling,
