@@ -3,6 +3,7 @@ import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
 import MsgActions from "./MsgActions";
 import Icon from "./Icon";
+import { entriesFromHistory } from "../export";
 import type { ChipData } from "./ToolChip";
 import type { MessageRow } from "../types";
 
@@ -10,7 +11,16 @@ function timeStr(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function Message({ msg, onRetry }: { msg: MessageRow; onRetry?: () => void }) {
+export default function Message({
+  msg,
+  onRetry,
+  sessionTitle,
+}: {
+  msg: MessageRow;
+  onRetry?: () => void;
+  /** Session title, used to name the exported answer file. */
+  sessionTitle?: string;
+}) {
   if (msg.role === "system") return null;
 
   if (msg.role === "tool") {
@@ -56,7 +66,18 @@ export default function Message({ msg, onRetry }: { msg: MessageRow; onRetry?: (
           <div className="md muted">(empty)</div>
         )}
         {msg.model && <div className="stamp model-stamp">{msg.model}</div>}
-        <MsgActions copyText={msg.content} onRetry={onRetry} />
+        <MsgActions
+          copyText={msg.content}
+          onRetry={onRetry}
+          exportData={
+            msg.content
+              ? {
+                  title: `${sessionTitle || "chatty"} — answer`,
+                  entries: entriesFromHistory([msg]),
+                }
+              : undefined
+          }
+        />
       </div>
     </div>
   );

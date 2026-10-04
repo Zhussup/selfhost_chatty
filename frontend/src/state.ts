@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { api, streamChat, type ChatRequestBody } from "./api";
 import type { MessageRow, ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
 import { clearLayout, loadLayout } from "./persist";
+import type { ExportEntry } from "./export";
 import {
   clamp,
   findNeighbor,
@@ -40,6 +41,11 @@ interface StoreState {
   root: PaneNode;
   focusedPaneId: string;
 
+  /** Non-null while a print-only copy of a conversation is mounted (PrintDoc).
+   *  Lives in the store, not in the menu that triggered it: the menu sits in a
+   *  hover-revealed footer that may unmount before the print dialog closes. */
+  printJob: { title: string; entries: ExportEntry[] } | null;
+
   boot: () => Promise<void>;
   login: (password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -60,6 +66,11 @@ interface StoreState {
   setModel: (paneId: string, name: string) => void;
   cycleThink: (paneId: string) => void;
   toggleTools: (paneId: string) => void;
+
+  /** Open a conversation in the print-only document (PDF via the print dialog). */
+  printDoc: (title: string, entries: ExportEntry[]) => void;
+  /** Called by PrintDoc once the print dialog is done. */
+  endPrint: () => void;
 
   splitPane: (paneId: string, dir: SplitDir) => void;
   closePane: (paneId: string) => void;
@@ -128,6 +139,8 @@ export const useStore = create<StoreState>((set, get) => {
     panes: { [firstId]: makePane(firstId) },
     root: leaf(firstId),
     focusedPaneId: firstId,
+
+    printJob: null,
 
     boot: async () => {
       try {
@@ -491,6 +504,14 @@ export const useStore = create<StoreState>((set, get) => {
 
     toggleTools: (paneId) => {
       patch(paneId, (p) => ({ useTools: !p.useTools }));
+    },
+
+    printDoc: (title, entries) => {
+      if (entries.length) set({ printJob: { title, entries } });
+    },
+
+    endPrint: () => {
+      if (get().printJob) set({ printJob: null });
     },
 
     splitPane: (paneId, dir) => {

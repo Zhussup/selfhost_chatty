@@ -7,7 +7,9 @@ import ToolChip, { type ChipData } from "./ToolChip";
 import Composer from "./Composer";
 import ModelPicker from "./ModelPicker";
 import MsgActions from "./MsgActions";
+import ExportMenu from "./ExportMenu";
 import Icon from "./Icon";
+import { entriesFromHistory, entriesFromTurn } from "../export";
 import { useTypewriter } from "./useTypewriter";
 import { PaneProvider, usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
@@ -84,8 +86,15 @@ function PaneBody() {
 function PaneHeader({ paneId }: { paneId: string }) {
   const sessionId = usePane((p) => p.sessionId, null);
   const streaming = usePane((p) => !!p.turn && !p.turn.done, false);
+  const history = usePane((p) => p.history, EMPTY_HISTORY);
+  const turn = usePane((p) => p.turn, null);
   const sessions = useStore((st) => st.sessions);
   const title = sessions.find((s) => s.id === sessionId)?.title ?? "New chat";
+  // whole dialog — including the exchange still streaming, if any
+  const exportEntries = [
+    ...entriesFromHistory(history),
+    ...(turn ? entriesFromTurn(turn) : []),
+  ];
 
   const split = (dir: "row" | "col") => {
     useStore.getState().splitPane(paneId, dir);
@@ -97,6 +106,7 @@ function PaneHeader({ paneId }: { paneId: string }) {
       {streaming && <span className="dot pulse" />}
       <span className="pane-title">{title}</span>
       <ModelPicker />
+      <ExportMenu title={title} entries={exportEntries} />
       <button className="icon" title="Split right — Ctrl+Shift+E" onClick={() => split("row")}>
         <Icon name="splitV" />
       </button>
@@ -123,6 +133,7 @@ function MessageList() {
   const turn = usePane((p) => p.turn, null);
   const history = usePane((p) => p.history, EMPTY_HISTORY);
   const busy = usePane((p) => p.busy, false);
+  const sessionTitle = useStore((st) => st.sessions.find((s) => s.id === sessionId)?.title);
   // Smooths the streamed answer; owned here (not in StreamingTurn) so the
   // scroll effect below can track the displayed length as it grows.
   const displayText = useTypewriter(turn?.text ?? "", !!turn && !turn.done);
@@ -213,6 +224,7 @@ function MessageList() {
             <div key={m.id}>
               <Message
                 msg={m}
+                sessionTitle={sessionTitle}
                 onRetry={canRetry ? () => useStore.getState().retry(paneId) : undefined}
               />
             </div>

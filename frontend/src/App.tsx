@@ -4,6 +4,7 @@ import Chat from "./components/Chat";
 import Dashboard from "./components/Dashboard";
 import Sidebar from "./components/Sidebar";
 import Icon from "./components/Icon";
+import PrintDoc from "./components/PrintDoc";
 import { useStore } from "./state";
 
 const RAIL_KEY = "chat.rail";
@@ -68,6 +69,7 @@ export default function App() {
       <main className="content">
         <TabBody />
       </main>
+      <PrintDoc />
     </div>
   );
 }

@@ -1,18 +1,23 @@
 import { useState } from "react";
 import Icon from "./Icon";
+import ExportMenu from "./ExportMenu";
+import type { ExportEntry } from "../export";
 
 /** Actions revealed on hover under an assistant answer — Ant Design X's
- *  `Actions` footer: copy the full text, or regenerate the exchange. */
+ *  `Actions` footer: copy the full text, download it, or regenerate. */
 export default function MsgActions({
   copyText,
   onRetry,
+  exportData,
 }: {
   copyText?: string;
   onRetry?: () => void;
+  /** When set, shows the download button (Markdown / PDF) for this answer. */
+  exportData?: { title: string; entries: ExportEntry[] };
 }) {
   const [copied, setCopied] = useState(false);
 
-  if (!copyText && !onRetry) return null;
+  if (!copyText && !onRetry && !exportData) return null;
 
   const copy = () => {
     if (!copyText) return;
@@ -37,6 +42,7 @@ export default function MsgActions({
           <Icon name="refresh" size={15} />
         </button>
       )}
+      {exportData && <ExportMenu title={exportData.title} entries={exportData.entries} />}
     </div>
   );
 }

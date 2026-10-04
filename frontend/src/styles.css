@@ -515,6 +515,10 @@ code {
   gap: 8px;
   height: 40px;
   padding: 0 8px;
+  /* Width of the hover action strip (4 × 26px icon + 3 × 1px gap + 2 × 2px
+     padding). The actions are absolutely positioned, so without reserving this
+     much room they land on top of the title — the meta gives it up on hover. */
+  --session-actions-w: 111px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   animation: fade 0.18s ease both;
@@ -560,6 +564,7 @@ code {
   right: 6px;
   top: 50%;
   transform: translateY(-50%);
+  width: var(--session-actions-w);
   display: flex;
   align-items: center;
   gap: 1px;
@@ -583,6 +588,8 @@ code {
 .session:hover .meta,
 .session.active .meta {
   visibility: hidden;
+  /* still in flow, so it is what keeps the title clear of the actions */
+  min-width: var(--session-actions-w);
 }
 .rename-input {
   width: calc(100% - 2px);
@@ -1863,5 +1870,174 @@ details.thinking[open] summary::before {
   }
   .spinner {
     border-top-color: var(--accent);
+  }
+}
+
+/* --- export menu (download an answer / the whole dialog) -------------------- */
+/* The popover is portaled to <body> (see ExportMenu.tsx) and positioned from
+   the trigger's viewport rect, so it must be fixed — an absolutely positioned
+   child would be clipped by .msg-list's own scroll container. */
+.export-wrap {
+  display: inline-flex;
+}
+.export-menu {
+  position: fixed;
+  width: 208px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  z-index: 70; /* above the model picker (50) and the mobile scrim (55) */
+  transform-origin: top left;
+  animation: pop 0.14s ease-out both;
+}
+.export-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--fg-2);
+  font-size: 13px;
+  text-align: left;
+}
+.export-item:hover {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+.export-label {
+  flex: 1;
+}
+.export-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- print document (the PDF path) ----------------------------------------- */
+/* A print-only copy of the conversation is portaled to <body>; on paper the
+   app is hidden and this takes its place. Rendering it with the chat's own
+   markdown means code, tables and fonts match the screen exactly — the
+   browser's print dialog then writes the PDF. */
+.print-doc {
+  display: none;
+}
+
+@page {
+  margin: 16mm 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  #root {
+    display: none !important;
+  }
+  .print-doc {
+    display: block;
+    /* paper is white whatever theme the app is in: re-declare the tokens here
+       so every var()-driven rule inside (markdown, code, bubbles) follows */
+    --bg: #fff;
+    --main-bg: #fff;
+    --panel: #fff;
+    --panel-2: #f4f4f4;
+    --panel-3: #ececec;
+    --fg: #111;
+    --fg-2: #2e2e2e;
+    --muted: #666;
+    --border: #d9d9d9;
+    --border-strong: #b5b5b5;
+    --accent: #111;
+    --accent-fg: #fff;
+    --user-bubble: #f2f2f2;
+    --err: #000;
+    --hljs-comment: #6a6a6a;
+    --hljs-keyword: #000;
+    --hljs-string: #3d3d3d;
+    --hljs-func: #1f1f1f;
+    --hljs-number: #333;
+    --hljs-builtin: #444;
+    --hljs-type: #111;
+    --hljs-name: #222;
+    --hljs-var: #444;
+    --hljs-addition-bg: #e8e8e8;
+    --hljs-deletion-bg: #f5f5f5;
+
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.5;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .print-title {
+    margin: 0 0 3px;
+    font-size: 19px;
+  }
+  .print-meta {
+    margin-bottom: 20px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .print-msg {
+    margin: 0 0 18px;
+  }
+  .print-who {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .print-user .print-body {
+    padding: 9px 12px;
+    background: var(--user-bubble);
+    border-radius: 8px;
+    white-space: pre-wrap; /* user text is plain, not markdown */
+  }
+  .print-quote {
+    margin-bottom: 8px;
+    padding-left: 10px;
+    border-left: 3px solid var(--border-strong);
+    color: var(--muted);
+  }
+  .print-thinking {
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .print-thinking summary {
+    cursor: default;
+  }
+  .print-tool pre {
+    margin: 0;
+    padding: 9px 11px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+  /* code must wrap on paper — a horizontal overflow would be cut off */
+  .print-doc pre,
+  .print-doc code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .print-doc .copy-btn {
+    display: none;
+  }
+  /* keep a heading with the answer it introduces */
+  .print-assistant > .md > :first-child {
+    break-after: avoid;
+  }
+  .print-tool,
+  .print-thinking {
+    break-inside: avoid;
   }
 }
