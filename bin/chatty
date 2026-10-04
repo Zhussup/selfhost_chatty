@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# chatty — selfhost chat одной командой из любого места в консоли.
+#
+#   chatty            поднять сервер в фоне и открыть браузер
+#                     (если уже запущен — не поднимает второй, просто открывает вкладку)
+#   chatty fg         то же, но в текущем терминале (Ctrl+C останавливает)
+#   chatty dev        dev-режим: uvicorn + vite hot-reload (Ctrl+C останавливает)
+#   chatty stop       остановить запущенный сервер
+#   chatty restart    stop + запуск
+#   chatty status     что запущено и на каком порту
+#   chatty logs       хвост лога фонового сервера (tail -f)
+#   chatty install    прописать себя в PATH (~/.local/bin/chatty)
+#
+# Переменные: CHATTY_DIR (каталог проекта), CHATTY_NO_OPEN=1 (не открывать браузер),
+#             CHATTY_WAIT=<сек> (сколько ждать старта, по умолчанию 300).
+set -euo pipefail
+
+# --- где проект: этот файл может быть симлинком из ~/.local/bin ---
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do
+  dir=$(cd -P "$(dirname "$src")" && pwd)
+  src=$(readlink "$src")
+  case $src in /*) ;; *) src=$dir/$src ;; esac
+done
+ROOT=${CHATTY_DIR:-$(cd -P "$(dirname "$src")/.." && pwd)}
+
+RUN_DIR="$ROOT/.run"
+PID_FILE="$RUN_DIR/chatty.pid"
+LOG_FILE="$RUN_DIR/chatty.log"
+URL_FILE="$RUN_DIR/chatty.url"
+
+usage() {
+  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$src"
+}
+
+# порт-предпочтение: .env → 8000 (как в run.sh)
+env_port() {
+  local p=""
+  [ -f "$ROOT/.env" ] && p=$(grep -E '^APP_PORT=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d ' "')
+  printf '%s' "${p:-8000}"
+}
+
+# первый свободный порт начиная с $1 (IPv4+IPv6, как port_free в run.sh)
+free_port() {
+  python3 - "$1" <<'PY'
+import errno, socket, sys
+
+start = int(sys.argv[1])
+
+def is_free(port: int) -> bool:
+    for fam, addr in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        s = socket.socket(fam)
+        try:
+            s.bind((addr, port))
+        except OSError as e:
+            if e.errno in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL):
+                continue          # family unsupported on this host — ignore
+            return False          # address in use
+        finally:
+            s.close()
+    return True
+
+for p in range(start, start + 11):
+    if is_free(p):
+        print(p)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+# pid фонового сервера, если он жив и это действительно наш процесс
+pid_from_file() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE 'uvicorn|run\.sh' || return 1
+  printf '%s' "$pid"
+}
+
+# запущенный uvicorn этого проекта, даже если его подняли не мы (./run.sh руками)
+# → печатает "<pid> <url>"
+detect_running() {
+  local pid="" port="" p cwd cmd
+  if pid=$(pid_from_file); then
+    printf '%s %s\n' "$pid" "$(read_url)"
+    return 0
+  fi
+  for p in /proc/[0-9]*; do
+    cwd=$(readlink "$p/cwd" 2>/dev/null) || continue
+    [ "$cwd" = "$ROOT" ] || continue
+    cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+    case $cmd in *"uvicorn backend.app"*) ;; *) continue ;; esac
+    port=$(printf '%s\n' "$cmd" | sed -n 's/.*--port[= ]\([0-9]\{1,\}\).*/\1/p')
+    printf '%s %s\n' "${p#/proc/}" "http://localhost:${port:-$(env_port)}"
+    return 0
+  done
+  return 1
+}
+
+read_url() {
+  if [ -s "$URL_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    cat "$URL_FILE"
+  else
+    printf 'http://localhost:%s' "$(env_port)"
+  fi
+}
+
+open_browser() {
+  [ "${CHATTY_NO_OPEN:-0}" = "1" ] && return 0
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+  command -v xdg-open >/dev/null 2>&1 || return 0
+  setsid xdg-open "$1" >/dev/null 2>&1 &
+}
+
+# ждём, пока порт начнёт отвечать по http; умирание процесса — сразу ошибка
+wait_ready() {
+  local port=$1 waited=0 limit=${CHATTY_WAIT:-300}
+  printf '[chatty] жду готовности'
+  while [ "$waited" -lt "$limit" ]; do
+    if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/" 2>/dev/null; then
+      printf ' готово\n'
+      return 0
+    fi
+    if ! pid_from_file >/dev/null; then
+      printf '\n[ERR] процесс завершился, последние строки лога:\n' >&2
+      tail -n 20 "$LOG_FILE" >&2 2>/dev/null || true
+      rm -f "$PID_FILE"
+      return 1
+    fi
+    printf '.'
+    sleep 1
+    waited=$((waited + 1))
+  done
+  printf '\n[ERR] не дождался ответа за %ss — смотри %s\n' "$limit" "$LOG_FILE" >&2
+  return 1
+}
+
+cmd_start() {
+  local pid url port
+  if read -r pid url < <(detect_running); then
+    echo "[chatty] уже запущен (pid $pid) — $url"
+    open_browser "$url"
+    return 0
+  fi
+
+  mkdir -p "$RUN_DIR"
+  rm -f "$PID_FILE"
+
+  local want
+  want=$(env_port)
+  if ! port=$(free_port "$want"); then
+    echo "[ERR] нет свободного порта в диапазоне $want-$((want + 10))" >&2
+    exit 1
+  fi
+  [ "$port" = "$want" ] || echo "[WARN] порт $want занят сторонним процессом — поднимаюсь на $port" >&2
+
+  url="http://localhost:$port"
+  printf '%s\n' "$url" > "$URL_FILE"
+  : > "$LOG_FILE"
+  echo "[chatty] стартую на $url  (лог: .run/chatty.log)"
+
+  # setsid: сервер не умирает вместе с терминалом и не ловит его Ctrl+C.
+  # pid пишет сам будущий процесс — после exec это ровно pid uvicorn.
+  setsid bash -c '
+    echo $$ > "$1"; shift
+    cd "$1"; shift
+    export APP_PORT="$1"; shift
+    exec ./run.sh >>"$1" 2>&1
+  ' _ "$PID_FILE" "$ROOT" "$port" "$LOG_FILE" </dev/null >/dev/null 2>&1 &
+
+  wait_ready "$port" || exit 1
+
+  echo "[chatty] пароль входа: grep '^AUTH_PASSWORD' .env"
+  echo "[chatty] логи: chatty logs   стоп: chatty stop"
+  open_browser "$url"
+}
+
+cmd_stop() {
+  local pid url
+  if ! read -r pid url < <(detect_running); then
+    echo "[chatty] не запущен"
+    rm -f "$PID_FILE" "$URL_FILE"
+    return 0
+  fi
+  echo "[chatty] останавливаю pid $pid ($url)"
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[chatty] не ответил на SIGTERM — SIGKILL"
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE" "$URL_FILE"
+  echo "[chatty] остановлен"
+}
+
+cmd_status() {
+  local pid url
+  if read -r pid url < <(detect_running); then
+    local code
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$url/" 2>/dev/null || echo "нет ответа")
+    echo "chatty: запущен (pid $pid) — $url  [http $code]"
+  else
+    echo "chatty: не запущен"
+    [ -f "$LOG_FILE" ] && echo "лог последнего запуска: $LOG_FILE"
+  fi
+}
+
+cmd_install() {
+  local dest="$HOME/.local/bin/chatty"
+  mkdir -p "$(dirname "$dest")"
+  ln -sfn "$ROOT/bin/chatty" "$dest"
+  echo "[chatty] установлен: $dest -> $ROOT/bin/chatty"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) echo "[chatty] $HOME/.local/bin уже в PATH — просто набери 'chatty'" ;;
+    *) echo "[WARN] добавь в ~/.bashrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2 ;;
+  esac
+}
+
+cmd=${1:-start}
+shift 2>/dev/null || true
+
+case "$cmd" in
+  start)           cmd_start ;;
+  fg|run)          cd "$ROOT"; exec ./run.sh "$@" ;;
+  dev)             cd "$ROOT"; exec ./dev.sh "$@" ;;
+  stop)            cmd_stop ;;
+  restart)         cmd_stop; cmd_start ;;
+  status)          cmd_status ;;
+  logs)            [ -f "$LOG_FILE" ] || { echo "[chatty] лога пока нет ($LOG_FILE)" >&2; exit 1; }
+                   exec tail -f "$LOG_FILE" ;;
+  install)         cmd_install ;;
+  -h|--help|help)  usage ;;
+  *)               echo "[chatty] неизвестная команда: $cmd" >&2; usage >&2; exit 2 ;;
+esac

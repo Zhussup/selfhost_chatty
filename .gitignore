@@ -17,3 +17,5 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
+# рантайм chatty (pid, лог, url)
+.run/
