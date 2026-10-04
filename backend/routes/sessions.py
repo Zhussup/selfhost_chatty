@@ -42,7 +42,7 @@ async def get_session(session_id: str) -> dict:
     if srow is None:
         raise HTTPException(status_code=404, detail="session not found")
     mrows = db.q(
-        "SELECT id, role, content, thinking, tool_calls_json, tool_call_id, tool_name, error, model, sort, created_at "
+        "SELECT id, role, content, quote, thinking, tool_calls_json, tool_call_id, tool_name, error, model, sort, created_at "
         "FROM messages WHERE session_id=? ORDER BY sort",
         (session_id,),
     )
@@ -83,12 +83,22 @@ async def export_md(session_id: str) -> PlainTextResponse:
     srow = db.one("SELECT title FROM sessions WHERE id=?", (session_id,))
     if srow is None:
         raise HTTPException(status_code=404, detail="session not found")
-    rows = db.q("SELECT role, content, thinking, tool_calls_json, tool_name, sort FROM messages WHERE session_id=? ORDER BY sort", (session_id,))
+    # created_at is read below for the stamps — it must be selected (sqlite3.Row
+    # raises IndexError on a column the query did not return).
+    rows = db.q(
+        "SELECT role, content, quote, thinking, tool_calls_json, tool_name, created_at FROM messages "
+        "WHERE session_id=? ORDER BY sort",
+        (session_id,),
+    )
     parts = [f"# {srow['title']}", ""]
     for r in rows:
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["created_at"]))
         if r["role"] == "user":
-            parts += [f"## You · {stamp}", "", r["content"], ""]
+            parts += [f"## You · {stamp}", ""]
+            quoted = (r["quote"] or "").strip()
+            if quoted:
+                parts += ["> " + "\n> ".join(quoted.splitlines()), ""]
+            parts += [r["content"], ""]
         elif r["role"] == "assistant":
             parts += [f"## Assistant · {stamp}", ""]
             if r["thinking"]:

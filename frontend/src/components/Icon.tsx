@@ -31,6 +31,7 @@ export type IconName =
   | "hash"
   | "list"
   | "alert"
+  | "quote"
   | "sparkle";
 
 const PATHS: Record<IconName, ReactNode> = {
@@ -136,6 +137,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 9v4M12 17h.01" />
     </>
   ),
+  quote: <path d="M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v7a3 3 0 0 1-3 3M19 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v7a3 3 0 0 1-3 3" />,
   sparkle: <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />,
 };
 

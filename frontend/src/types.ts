@@ -19,6 +19,8 @@ export interface MessageRow {
   role: "system" | "user" | "assistant" | "tool";
   sort: number;
   content: string;
+  /** Fragment of a previous answer this message replies to ("" when none). */
+  quote: string;
   thinking: string;
   tool_calls: ToolCall[] | null;
   tool_call_id: string | null;
@@ -59,6 +61,7 @@ export interface ChatTurn {
   message_id: string; // "" until meta arrives
   session_id: string;
   user_text: string; // the prompt just sent — rendered optimistically until the turn is persisted
+  quote: string; // the fragment that prompt replies to ("" when none)
   think_text: string;
   text: string;
   tools: {

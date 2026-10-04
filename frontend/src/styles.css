@@ -870,6 +870,44 @@ body.resizing {
   background: var(--panel-2);
 }
 
+/* Reply-to-selection affordance. Fixed, but portaled to <body>: inside a pane
+   `container-type: inline-size` would capture it as a containing block. */
+.quote-pop {
+  position: fixed;
+  z-index: 40; /* under the picker menu (50) and the scrim (55) */
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 244px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 12.5px;
+  box-shadow: var(--shadow-md);
+  user-select: none;
+  animation: pop 0.14s ease-out both;
+}
+.quote-pop svg {
+  flex: none;
+  color: var(--muted);
+}
+.quote-pop-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-pop-label {
+  flex: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+.quote-pop:hover {
+  background: var(--panel-2);
+}
+
 /* --- messages -------------------------------------------------------------- */
 .msg-list {
   flex: 1;
@@ -899,6 +937,17 @@ body.resizing {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 14.5px;
+}
+/* The fragment this prompt replied to. Same left-marker grammar as .md blockquote. */
+.bubble-quote {
+  margin-bottom: 7px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap; /* pre-wrap on .bubble does not descend into a block child */
+  overflow-wrap: anywhere;
 }
 .stamp {
   color: var(--muted);
@@ -1368,6 +1417,40 @@ details.thinking[open] summary::before {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* Pending quote chip — a child of the card, so the card keeps its DOM position. */
+.composer-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.composer-quote svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--muted);
+}
+.composer-quote-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-quote .icon {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 3px;
+}
 .composer textarea {
   display: block;
   width: 100%;
@@ -1651,6 +1734,9 @@ details.thinking[open] summary::before {
   }
   .usage-hint {
     display: none;
+  }
+  .composer-quote-text {
+    -webkit-line-clamp: 1;
   }
   .welcome h1 {
     font-size: 23px;

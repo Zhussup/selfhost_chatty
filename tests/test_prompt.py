@@ -10,10 +10,11 @@ def add(msgs, sid="sess") -> None:
     db.qx("INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?,?,?,?,?)", (sid, "t", "m", now, now))
     for i, m in enumerate(msgs, 1):
         db.qx(
-            "INSERT INTO messages (id, session_id, role, sort, content, thinking, tool_calls_json, tool_call_id, tool_name, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (f"m{i}-{sid}", sid, m["role"], i, m.get("content", ""), m.get("thinking", ""),
-             m.get("tool_calls_json"), m.get("tool_call_id"), m.get("tool_name"), now + i),
+            "INSERT INTO messages (id, session_id, role, sort, content, quote, thinking, tool_calls_json, tool_call_id, tool_name, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (f"m{i}-{sid}", sid, m["role"], i, m.get("content", ""), m.get("quote", ""),
+             m.get("thinking", ""), m.get("tool_calls_json"), m.get("tool_call_id"),
+             m.get("tool_name"), now + i),
         )
 
 
@@ -28,6 +29,18 @@ class PromptTests(BaseTestCase):
         self.assertEqual(out[0]["role"], "system")
         self.assertIn("Reply in the language", out[0]["content"])
         self.assertEqual(out[1], {"role": "user", "content": "привет"})
+
+    def test_quoted_user_row_becomes_blockquote(self):
+        add([{"role": "user", "content": "explain this", "quote": "line one\n\nline two"}])
+        out = build_messages(list(get_rows()))
+        # a blank line inside the quote stays inside it (bare ">"), then a
+        # blank line separates the quote from the reply
+        self.assertEqual(out[1]["content"], "> line one\n>\n> line two\n\nexplain this")
+
+    def test_rows_without_quote_column_still_work(self):
+        # hand-built rows (no `quote` key at all, as in older callers/tests)
+        out = build_messages([{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}])
+        self.assertEqual(out[1], {"role": "user", "content": "hi"})
 
     def test_notes_included(self):
         add([{"role": "user", "content": "hi"}])

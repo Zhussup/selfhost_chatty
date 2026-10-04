@@ -144,6 +144,40 @@ class RegenerateTests(BaseTestCase):
         ok_rows = chat_route.db.q("SELECT COUNT(*) AS n FROM requests WHERE status='ok'")[0]["n"]
         self.assertEqual(ok_rows, 2)
 
+    def test_quote_is_stored_and_survives_regenerate(self):
+        client = TestClient(app)
+        login(client)
+        seen = []
+
+        def factory(payload):
+            seen.append(payload)
+
+            async def gen():
+                yield {"message": {"role": "assistant", "content": "ok"}, "done": False}
+                yield {"done": True, "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 1}
+
+            return gen()
+
+        def user_quote(sid):
+            return chat_route.db.q(
+                "SELECT quote FROM messages WHERE role='user' AND session_id=?", (sid,)
+            )[0]["quote"]
+
+        with mock.patch.object(chat_route, "stream_chat", factory):
+            run(client, {"model": "m", "content": "explain", "quote": "check this", "use_tools": False})
+        sid = chat_route.db.q("SELECT id FROM sessions")[0]["id"]
+        self.assertEqual(user_quote(sid), "check this")
+        # the model sees the fragment as a blockquote ahead of the reply
+        self.assertTrue(seen[0]["messages"][1]["content"].startswith("> check this\n\n"))
+
+        # regenerate ignores the request's quote: no row is written, so the stored
+        # user row keeps its own fragment and the rebuilt prompt is unchanged
+        with mock.patch.object(chat_route, "stream_chat", factory):
+            run(client, {"session_id": sid, "model": "m", "content": "ignored",
+                         "quote": "should be ignored", "use_tools": False, "regenerate": True})
+        self.assertEqual(user_quote(sid), "check this")
+        self.assertTrue(seen[1]["messages"][1]["content"].startswith("> check this\n\n"))
+
 
 class CancelSaveTests(unittest.TestCase):
     """Disconnect mid-stream: partial answer persists; no token ledger row."""

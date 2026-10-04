@@ -23,6 +23,7 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
   const think = usePane((p) => p.think, null);
   const useTools = usePane((p) => p.useTools, true);
   const busy = usePane((p) => p.busy, false);
+  const quote = usePane((p) => p.quote, null);
 
   const streaming = !!turn && !turn.done;
 
@@ -66,6 +67,23 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
     <form className="composer" onSubmit={onSubmit}>
       {/* DOM index 0 in every state — never insert a sibling before this card */}
       <div className="composer-card">
+        {quote && (
+          <div className="composer-quote">
+            <Icon name="quote" size={13} />
+            <span className="composer-quote-text">{quote}</span>
+            <button
+              type="button"
+              className="icon"
+              title="Remove quote"
+              onClick={() => {
+                useStore.getState().clearQuote(paneId);
+                taRef.current?.focus();
+              }}
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </div>
+        )}
         <textarea
           ref={taRef}
           placeholder={model ? `Message ${model}…` : "Pick a model first…"}

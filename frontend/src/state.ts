@@ -52,8 +52,10 @@ interface StoreState {
   openSession: (paneId: string, id: string) => Promise<void>;
   openInFocusedPane: (id: string) => Promise<void>;
   newSession: (paneId: string) => void;
-  send: (paneId: string, content: string, opts?: { regenerate?: boolean }) => Promise<void>;
+  send: (paneId: string, content: string, opts?: { regenerate?: boolean; quote?: string }) => Promise<void>;
   retry: (paneId: string) => void;
+  setQuote: (paneId: string, text: string) => void;
+  clearQuote: (paneId: string) => void;
   stop: (paneId: string) => void;
   setModel: (paneId: string, name: string) => void;
   cycleThink: (paneId: string) => void;
@@ -222,7 +224,9 @@ export const useStore = create<StoreState>((set, get) => {
         const panes: Record<string, Pane> = {};
         for (const [pid, p] of Object.entries(s.panes)) {
           panes[pid] =
-            p.sessionId === id ? { ...p, sessionId: null, history: [], turn: null, busy: false } : p;
+            p.sessionId === id
+              ? { ...p, sessionId: null, history: [], turn: null, busy: false, quote: null }
+              : p;
         }
         return { sessions: s.sessions.filter((x) => x.id !== id), panes };
       });
@@ -235,7 +239,7 @@ export const useStore = create<StoreState>((set, get) => {
 
     openSession: async (paneId, id) => {
       abortStore[paneId]?.abort();
-      patch(paneId, () => ({ sessionId: id, history: [], turn: null, busy: false }));
+      patch(paneId, () => ({ sessionId: id, history: [], turn: null, busy: false, quote: null }));
       const full = await api.session(id);
       set((s) => {
         const p = s.panes[paneId];
@@ -257,7 +261,7 @@ export const useStore = create<StoreState>((set, get) => {
     newSession: (paneId) => {
       abortStore[paneId]?.abort();
       delete abortStore[paneId];
-      patch(paneId, () => ({ sessionId: null, history: [], turn: null, busy: false }));
+      patch(paneId, () => ({ sessionId: null, history: [], turn: null, busy: false, quote: null }));
     },
 
     send: async (paneId, content, opts) => {
@@ -269,6 +273,9 @@ export const useStore = create<StoreState>((set, get) => {
       if (!model) return;
 
       const regenerate = opts?.regenerate === true;
+      // Regenerate never carries a quote: the stored user row already owns one
+      // (and the backend ignores the field on that path anyway).
+      const quote = regenerate ? "" : opts?.quote !== undefined ? opts.quote : (pane.quote ?? "");
       const ctrl = new AbortController();
       abortStore[paneId] = ctrl;
       patch(paneId, () => ({
@@ -278,6 +285,7 @@ export const useStore = create<StoreState>((set, get) => {
           // On regenerate the user row is already in history, so an optimistic
           // bubble would echo it twice.
           user_text: regenerate ? "" : content,
+          quote,
           think_text: "",
           text: "",
           tools: [],
@@ -285,6 +293,7 @@ export const useStore = create<StoreState>((set, get) => {
         },
         history: regenerate ? truncateAfterLastUser(pane.history) : pane.history,
         busy: true,
+        quote: null,
       }));
 
       const apply = (ev: StreamEvent) => {
@@ -364,6 +373,7 @@ export const useStore = create<StoreState>((set, get) => {
         session_id: pane.sessionId,
         model,
         content,
+        ...(quote ? { quote } : {}),
         think: pane.think,
         use_tools: pane.useTools,
         regenerate,
@@ -433,7 +443,10 @@ export const useStore = create<StoreState>((set, get) => {
         // as a normal message — regenerating would truncate against an older
         // exchange and the model would answer the wrong prompt.
         if (!turn.user_text) return;
-        if (turn.session_id === "") get().send(paneId, turn.user_text);
+        // The quote travels with the resent prompt — picking up whatever chip is
+        // pending in the composer would retry a different message than the one
+        // that failed. Regenerate reads the stored row instead, so no quote here.
+        if (turn.session_id === "") get().send(paneId, turn.user_text, { quote: turn.quote });
         else get().send(paneId, turn.user_text, { regenerate: true });
         return;
       }
@@ -451,6 +464,14 @@ export const useStore = create<StoreState>((set, get) => {
 
     stop: (paneId) => {
       abortStore[paneId]?.abort();
+    },
+
+    setQuote: (paneId, text) => {
+      patch(paneId, () => ({ quote: text }));
+    },
+
+    clearQuote: (paneId) => {
+      patch(paneId, () => ({ quote: null }));
     },
 
     setModel: (paneId, name) => {

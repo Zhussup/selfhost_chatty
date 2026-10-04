@@ -75,6 +75,7 @@ export interface ChatRequestBody {
   session_id: string | null;
   model: string;
   content: string;
+  quote?: string | null;
   think: "low" | "medium" | "high" | null;
   use_tools: boolean;
   regenerate: boolean;

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Message from "./Message";
 import Markdown from "./Markdown";
 import ThinkingBlock from "./ThinkingBlock";
@@ -10,6 +11,7 @@ import Icon from "./Icon";
 import { useTypewriter } from "./useTypewriter";
 import { PaneProvider, usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
+import { MAX_QUOTE_CHARS } from "../panes";
 import type { ChatTurn, MessageRow } from "../types";
 
 const EMPTY_HISTORY: MessageRow[] = [];
@@ -126,15 +128,56 @@ function MessageList() {
   const displayText = useTypewriter(turn?.text ?? "", !!turn && !turn.done);
   const stick = useRef(true);
   const listRef = useRef<HTMLDivElement>(null);
+  // The reply affordance over a text selection. Local state on purpose: it
+  // changes on every pointerup and no other pane should re-render for it.
+  const [pill, setPill] = useState<{ text: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
+    const hide = () => setPill(null);
     const onScroll = () => {
       stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      hide(); // a selection anchored in viewport coords does not survive a scroll
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.button !== 0) return hide();
+      const target = e.target as Element | null;
+      if (!target || target.closest("button, a")) return hide();
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return hide();
+      const text = sel.toString().trim();
+      if (text.length < 2) return hide();
+      const node = sel.focusNode;
+      const host = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
+      if (!host || !el.contains(host) || !host.closest(".msg.assistant")) return hide();
+      const capped =
+        text.length > MAX_QUOTE_CHARS ? text.slice(0, MAX_QUOTE_CHARS).trimEnd() + "…" : text;
+      // the last line of the selection, in viewport coords — the pill is portaled
+      // to <body>, because `.pane` has container-type and would capture position:fixed
+      const range = sel.getRangeAt(0);
+      const rects = range.getClientRects();
+      const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return hide();
+      setPill({
+        text: capped,
+        x: Math.min(Math.max(rect.left, 8), window.innerWidth - 252),
+        y: rect.top < 60 ? rect.bottom + 8 : rect.top - 42,
+      });
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") hide();
     };
     el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    el.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("resize", hide);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("resize", hide);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, []);
 
   useEffect(() => {
@@ -155,32 +198,59 @@ function MessageList() {
   const lastId = history[history.length - 1]?.id;
 
   return (
-    <div className="msg-list" ref={listRef}>
-      {sessionId === null && !turn && <Welcome />}
-      {history.map((m) => {
-        if (m.role === "assistant" && m.tool_calls && m.tool_calls.length && !m.content && !m.thinking) {
-          // assistant rows that exist only to carry tool calls render through the tool rows
-          return null;
-        }
-        // Only the newest answer can be regenerated — an older one would rerun
-        // the tail exchange instead, which is not what the button promises.
-        const canRetry = m.role === "assistant" && m.id === lastId && !busy && !turn;
-        return (
-          <div key={m.id}>
-            <Message
-              msg={m}
-              onRetry={canRetry ? () => useStore.getState().retry(paneId) : undefined}
-            />
+    <>
+      <div className="msg-list" ref={listRef}>
+        {sessionId === null && !turn && <Welcome />}
+        {history.map((m) => {
+          if (m.role === "assistant" && m.tool_calls && m.tool_calls.length && !m.content && !m.thinking) {
+            // assistant rows that exist only to carry tool calls render through the tool rows
+            return null;
+          }
+          // Only the newest answer can be regenerated — an older one would rerun
+          // the tail exchange instead, which is not what the button promises.
+          const canRetry = m.role === "assistant" && m.id === lastId && !busy && !turn;
+          return (
+            <div key={m.id}>
+              <Message
+                msg={m}
+                onRetry={canRetry ? () => useStore.getState().retry(paneId) : undefined}
+              />
+            </div>
+          );
+        })}
+        {turn && showUserBubble(turn) && (
+          <div className="msg user">
+            <div className="bubble">
+              {turn.quote ? <div className="bubble-quote">{turn.quote}</div> : null}
+              {turn.user_text}
+            </div>
           </div>
-        );
-      })}
-      {turn && showUserBubble(turn) && (
-        <div className="msg user">
-          <div className="bubble">{turn.user_text}</div>
-        </div>
-      )}
-      {turn && <StreamingTurn turn={turn} text={displayText} />}
-    </div>
+        )}
+        {turn && <StreamingTurn turn={turn} text={displayText} />}
+      </div>
+      {pill &&
+        createPortal(
+          <button
+            type="button"
+            className="quote-pop"
+            style={{ left: pill.x, top: pill.y }}
+            // keeps the browser from collapsing the selection on mousedown, which
+            // would drop the pill before the click lands
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              useStore.getState().setQuote(paneId, pill.text);
+              focusComposer(paneId);
+              window.getSelection()?.removeAllRanges();
+              setPill(null);
+            }}
+          >
+            <Icon name="quote" size={14} />
+            <span className="quote-pop-text">{pill.text}</span>
+            <span className="quote-pop-label">Reply</span>
+          </button>,
+          document.body
+        )}
+    </>
   );
 }
 

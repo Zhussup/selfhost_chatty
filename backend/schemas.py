@@ -17,6 +17,10 @@ class ChatIn(BaseModel):
     session_id: Optional[str] = None
     model: str
     content: str = Field(min_length=1)
+    # The fragment of a previous answer the user replied to. Persisted on the
+    # user row and folded back into the prompt by build_messages; ignored when
+    # `regenerate` is set (the stored row already owns the quote).
+    quote: Optional[str] = Field(None, max_length=2000)
     think: Optional[Literal["low", "medium", "high"]] = None
     use_tools: bool = True
     regenerate: bool = False

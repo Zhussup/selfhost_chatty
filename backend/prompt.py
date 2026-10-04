@@ -22,6 +22,27 @@ def system_prompt(notes: str = "") -> str:
     return "\n\n".join(parts)
 
 
+def _field(row: Any, key: str) -> str:
+    """Read a column without presuming the row shape: sqlite3.Row has no .get and
+    raises IndexError on an unknown label, hand-built dicts (tests) raise KeyError.
+    Anything that is not a string — None included — counts as absent."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def _quote_prefix(quote: str) -> str:
+    """The quoted fragment as a markdown blockquote, separated from the reply by a
+    blank line. A blank line inside the quote becomes a bare ">": without it the
+    blockquote would end early and the rest of the quote would read as user prose."""
+    lines = quote.strip().splitlines()
+    if not lines:
+        return ""
+    return "\n".join(f"> {line}" if line.strip() else ">" for line in lines) + "\n\n"
+
+
 def build_messages(rows: list, notes: str = "") -> list[dict[str, Any]]:
     """Rows ordered oldest->newest, already filtered to last N; system injected fresh at the top."""
     out: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(notes)}]
@@ -30,7 +51,11 @@ def build_messages(rows: list, notes: str = "") -> list[dict[str, Any]]:
         if role == "system":
             continue
         if role == "user":
-            out.append({"role": "user", "content": r["content"]})
+            content = r["content"]
+            quote = _field(r, "quote").strip()
+            if quote:
+                content = _quote_prefix(quote[:2000]) + content
+            out.append({"role": "user", "content": content})
         elif role == "assistant":
             msg: dict[str, Any] = {"role": "assistant", "content": r["content"] or ""}
             if r["tool_calls_json"]:

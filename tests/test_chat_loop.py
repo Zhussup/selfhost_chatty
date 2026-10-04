@@ -244,6 +244,23 @@ class SessionsTests(BaseTestCase):
         self.assertEqual(client.delete(f"/api/sessions/{sid}").status_code, 200)
         self.assertNotIn(sid, [s["id"] for s in client.get("/api/sessions").json()])
 
+    def test_export_of_a_quoted_turn(self):
+        # the empty-session export above never touched the stamp/quote paths
+        client = TestClient(app)
+        login(client)
+        turns = [[
+            {"message": {"role": "assistant", "content": "answer"}, "done": False},
+            {"done": True, "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 1},
+        ]]
+        with mock.patch.object(chat_route, "stream_chat", ndjson_factory(turns)):
+            resp = client.post("/api/chat", json={"model": "m", "content": "explain",
+                                                  "quote": "line one\nline two", "use_tools": False})
+        sid = json.loads([ln for ln in resp.text.splitlines() if ln.strip()][0])["session_id"]
+        exp = client.get(f"/api/sessions/{sid}/export.md")
+        self.assertEqual(exp.status_code, 200)  # stamps read created_at
+        self.assertIn("> line one\n> line two", exp.text)
+        self.assertIn("explain", exp.text)
+
     def test_404s(self):
         client = TestClient(app)
         login(client)

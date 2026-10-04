@@ -27,7 +27,10 @@ export default function Message({ msg, onRetry }: { msg: MessageRow; onRetry?: (
   if (msg.role === "user") {
     return (
       <div className="msg user">
-        <div className="bubble">{msg.content}</div>
+        <div className="bubble">
+          {msg.quote ? <div className="bubble-quote">{msg.quote}</div> : null}
+          {msg.content}
+        </div>
         <div className="stamp">{timeStr(msg.created_at)}</div>
       </div>
     );

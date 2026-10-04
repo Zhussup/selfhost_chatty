@@ -65,6 +65,7 @@ def _save_message(
     role: str,
     content: str = "",
     *,
+    quote: str = "",
     message_id: str | None = None,
     thinking: str = "",
     tool_calls: list[dict] | None = None,
@@ -75,14 +76,15 @@ def _save_message(
 ) -> str:
     mid = message_id or db.new_id()
     db.qx(
-        "INSERT INTO messages (id, session_id, role, sort, content, thinking, tool_calls_json, tool_call_id, tool_name, error, model, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages (id, session_id, role, sort, content, quote, thinking, tool_calls_json, tool_call_id, tool_name, error, model, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             mid,
             session_id,
             role,
             _next_sort(session_id),
             content,
+            quote,
             thinking,
             json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
             tool_call_id,
@@ -271,11 +273,14 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
             if body.regenerate:
                 _truncate_after_last_user(session_id)
             else:
-                _save_message(session_id, "user", body.content)
+                # The request's `quote` is read here and nowhere else: on the
+                # regenerate path no row is written, the surviving user row keeps
+                # its own quote, and build_messages rebuilds the blockquote from it.
+                _save_message(session_id, "user", body.content, quote=(body.quote or "").strip()[:2000])
 
             # --- upstream history ----------------------------------------------
             rows = db.q(
-                "SELECT role, content, thinking, tool_calls_json, tool_call_id, tool_name FROM messages "
+                "SELECT role, content, quote, thinking, tool_calls_json, tool_call_id, tool_name FROM messages "
                 "WHERE session_id=? ORDER BY sort",
                 (session_id,),
             )

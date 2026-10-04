@@ -18,6 +18,9 @@ export interface Pane {
   think: Think;
   useTools: boolean;
   busy: boolean;
+  /** Pending quote for the next message — a fragment picked out of an answer.
+   *  null = none. Not persisted: it is composer state, like the typed text. */
+  quote: string | null;
 }
 
 export interface PaneNodeLeaf {
@@ -45,6 +48,8 @@ export interface Rect {
 }
 
 export const MAX_PANES = 6;
+/** Capture cap for a picked quote — must stay under the backend's max_length. */
+export const MAX_QUOTE_CHARS = 1600;
 export const MIN_RATIO = 0.08;
 export const MAX_RATIO = 0.92;
 
@@ -67,6 +72,7 @@ export function makePane(id: string, model = ""): Pane {
     think: null,
     useTools: true,
     busy: false,
+    quote: null,
   };
 }
 

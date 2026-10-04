@@ -95,7 +95,12 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 MIGRATIONS: dict[int, str] = {
-    # 2: ALTER TABLE statements as schema evolves go here, keyed by target version
+    # 2: ALTER TABLE statements as schema evolves go here, keyed by target version.
+    # Kept out of DDL on purpose: init() always runs DDL first, so a fresh DB
+    # (user_version 0) reaches this step too — an ALTER on top of a column that
+    # DDL already created would fail with "duplicate column name".
+    # NOT NULL in ADD COLUMN needs the DEFAULT (SQLite requirement).
+    2: "ALTER TABLE messages ADD COLUMN quote TEXT NOT NULL DEFAULT ''",
 }
 
 
