@@ -92,6 +92,24 @@ class RegistryTests(BaseTestCase):
         self.assertEqual(res, "42")
         self.assertGreaterEqual(ms, 0)
 
+    def test_dispatch_memory_tools_end_to_end(self):
+        # every spec must survive dispatch(), not just be callable directly
+        res, ok, ms = asyncio.run(dispatch("memory_write", {"content": "user prefers tabs"}))
+        self.assertTrue(ok)
+        self.assertTrue(res.startswith("note saved"), res)
+        res, ok, ms = asyncio.run(dispatch("memory_list", {"query": "tabs"}))
+        self.assertTrue(ok)
+        self.assertIn("tabs", res)
+
+    def test_all_impls_are_awaitable(self):
+        # dispatch() awaits every impl, so a bare sync function breaks it
+        from inspect import iscoroutinefunction
+
+        from backend.tools.registry import tool_impls
+
+        for name, fn in tool_impls().items():
+            self.assertTrue(iscoroutinefunction(fn), f"{name} would break await in dispatch()")
+
     def test_preview(self):
         self.assertEqual(preview("x" * 50), "x" * 50)
         self.assertEqual(len(preview("y" * 1000)), 501)

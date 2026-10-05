@@ -24,3 +24,6 @@ class ChatIn(BaseModel):
     think: Optional[Literal["low", "medium", "high"]] = None
     use_tools: bool = True
     regenerate: bool = False
+    # Edit-and-resend: rewrite this stored user message and drop everything after
+    # it before running the turn. Mutually exclusive with `regenerate`.
+    edit_message_id: Optional[str] = None

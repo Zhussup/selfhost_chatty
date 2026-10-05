@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Markdown from "./Markdown";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
@@ -15,12 +16,19 @@ export default function Message({
   msg,
   onRetry,
   sessionTitle,
+  onEdit,
 }: {
   msg: MessageRow;
   onRetry?: () => void;
   /** Session title, used to name the exported answer file. */
   sessionTitle?: string;
+  /** When set, the user bubble gets an edit affordance that resends the prompt. */
+  onEdit?: (text: string) => void;
 }) {
+  // Hooks must run before the role-based early returns below.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
   if (msg.role === "system") return null;
 
   if (msg.role === "tool") {
@@ -35,6 +43,39 @@ export default function Message({
   }
 
   if (msg.role === "user") {
+    if (editing) {
+      const save = () => {
+        const text = draft.trim();
+        if (!text) return;
+        setEditing(false);
+        onEdit?.(text);
+      };
+      return (
+        <div className="msg user editing">
+          <div className="msg-edit">
+            <textarea
+              className="msg-edit-input"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
+              }}
+            />
+            <div className="msg-edit-actions">
+              <span className="muted">Esc — отмена, Ctrl+Enter — отправить</span>
+              <button type="button" className="pill" onClick={() => setEditing(false)}>
+                Cancel
+              </button>
+              <button type="button" className="pill primary" disabled={!draft.trim()} onClick={save}>
+                Save &amp; resend
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="msg user">
         <div className="bubble">
@@ -42,6 +83,21 @@ export default function Message({
           {msg.content}
         </div>
         <div className="stamp">{timeStr(msg.created_at)}</div>
+        {onEdit && (
+          <div className="msg-actions user-actions">
+            <button
+              type="button"
+              className="icon"
+              title="Edit & resend"
+              onClick={() => {
+                setDraft(msg.content);
+                setEditing(true);
+              }}
+            >
+              <Icon name="pencil" size={15} />
+            </button>
+          </div>
+        )}
       </div>
     );
   }

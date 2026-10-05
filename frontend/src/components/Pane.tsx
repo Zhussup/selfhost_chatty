@@ -220,12 +220,19 @@ function MessageList() {
           // Only the newest answer can be regenerated — an older one would rerun
           // the tail exchange instead, which is not what the button promises.
           const canRetry = m.role === "assistant" && m.id === lastId && !busy && !turn;
+          // Editing while a turn is in flight would race the stream's finalize.
+          const canEdit = m.role === "user" && !busy && !turn;
           return (
             <div key={m.id}>
               <Message
                 msg={m}
                 sessionTitle={sessionTitle}
                 onRetry={canRetry ? () => useStore.getState().retry(paneId) : undefined}
+                onEdit={
+                  canEdit
+                    ? (text) => useStore.getState().editMessage(paneId, m.id, text)
+                    : undefined
+                }
               />
             </div>
           );

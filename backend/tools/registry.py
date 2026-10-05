@@ -17,6 +17,15 @@ def _make_blocking(fn: Callable[..., Any]) -> Callable[..., Awaitable[str]]:
     return call
 
 
+def _make_async(fn: Callable[..., str]) -> Callable[..., Awaitable[str]]:
+    """Wrap a fast sync callable so it satisfies the async dispatch contract."""
+
+    async def call(**kwargs: Any) -> str:
+        return fn(**kwargs)
+
+    return call
+
+
 def tool_impls() -> dict[str, Callable[..., Awaitable[str]]]:
     from backend.tools import memory, pyexec, web_search
 
@@ -25,8 +34,8 @@ def tool_impls() -> dict[str, Callable[..., Awaitable[str]]]:
         "fetch_page": _make_blocking(web_search.fetch_page),
         "calc": _make_blocking(pyexec.calc),
         "python": _make_blocking(pyexec.run_python),
-        "memory_write": memory.upsert,   # sync sqlite (sub-ms)
-        "memory_list": memory.search,
+        "memory_write": _make_async(memory.upsert),  # sync sqlite (sub-ms)
+        "memory_list": _make_async(memory.search),
     }
 
 

@@ -58,7 +58,12 @@ interface StoreState {
   openSession: (paneId: string, id: string) => Promise<void>;
   openInFocusedPane: (id: string) => Promise<void>;
   newSession: (paneId: string) => void;
-  send: (paneId: string, content: string, opts?: { regenerate?: boolean; quote?: string }) => Promise<void>;
+  send: (
+    paneId: string,
+    content: string,
+    opts?: { regenerate?: boolean; quote?: string; edit_message_id?: string }
+  ) => Promise<void>;
+  editMessage: (paneId: string, messageId: string, text: string) => void;
   retry: (paneId: string) => void;
   setQuote: (paneId: string, text: string) => void;
   clearQuote: (paneId: string) => void;
@@ -97,6 +102,13 @@ function truncateAfterLastUser(history: MessageRow[]): MessageRow[] {
     if (history[i].role === "user") return history.slice(0, i + 1);
   }
   return history;
+}
+
+/** History up to (excluding) the given message — used while an edit streams, since
+ *  the edited prompt is re-rendered optimistically from the turn. */
+function truncateBeforeId(history: MessageRow[], id: string): MessageRow[] {
+  const i = history.findIndex((m) => m.id === id);
+  return i === -1 ? history : history.slice(0, i);
 }
 
 function abortAll(): void {
@@ -286,6 +298,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!model) return;
 
       const regenerate = opts?.regenerate === true;
+      const editId = opts?.edit_message_id;
       // Regenerate never carries a quote: the stored user row already owns one
       // (and the backend ignores the field on that path anyway).
       const quote = regenerate ? "" : opts?.quote !== undefined ? opts.quote : (pane.quote ?? "");
@@ -304,7 +317,11 @@ export const useStore = create<StoreState>((set, get) => {
           tools: [],
           done: false,
         },
-        history: regenerate ? truncateAfterLastUser(pane.history) : pane.history,
+        history: regenerate
+          ? truncateAfterLastUser(pane.history)
+          : editId
+            ? truncateBeforeId(pane.history, editId)
+            : pane.history,
         busy: true,
         quote: null,
       }));
@@ -390,6 +407,7 @@ export const useStore = create<StoreState>((set, get) => {
         think: pane.think,
         use_tools: pane.useTools,
         regenerate,
+        ...(editId ? { edit_message_id: editId } : {}),
       };
 
       try {
@@ -441,6 +459,15 @@ export const useStore = create<StoreState>((set, get) => {
           patch(paneId, finish);
         }
       }
+    },
+
+    /** Rewrite an already-sent prompt and regenerate the answer from it. */
+    editMessage: (paneId, messageId, text) => {
+      const pane = get().panes[paneId];
+      if (!pane || pane.busy || (pane.turn && !pane.turn.done)) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      void get().send(paneId, trimmed, { edit_message_id: messageId });
     },
 
     /** Regenerate the last exchange, resuming from wherever the pane left off. */

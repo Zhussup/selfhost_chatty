@@ -140,6 +140,20 @@ def _truncate_after_last_user(session_id: str) -> None:
         db.qx("DELETE FROM messages WHERE session_id=? AND sort>?", (session_id, last_sort))
 
 
+def _edit_user_message(session_id: str, message_id: str, content: str) -> None:
+    """Rewrite a sent user message and drop everything after it (edit-and-resend).
+    Silently no-ops if the id is not a user row of this session — the turn then
+    just runs against the existing history."""
+    row = db.one(
+        "SELECT sort FROM messages WHERE id=? AND session_id=? AND role='user'",
+        (message_id, session_id),
+    )
+    if row is None:
+        return
+    db.qx("UPDATE messages SET content=? WHERE id=?", (content, message_id))
+    db.qx("DELETE FROM messages WHERE session_id=? AND sort>?", (session_id, row["sort"]))
+
+
 def _upstream_tool_msg(call: dict[str, Any]) -> dict[str, Any]:
     msg: dict[str, Any] = {"function": {"name": call["name"], "arguments": call["arguments"]}}
     if call.get("id"):
@@ -272,6 +286,10 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
 
             if body.regenerate:
                 _truncate_after_last_user(session_id)
+            elif body.edit_message_id:
+                # Edit-and-resend: rewrite the stored prompt in place and drop the
+                # exchange after it, so this turn regenerates from the new text.
+                _edit_user_message(session_id, body.edit_message_id, body.content)
             else:
                 # The request's `quote` is read here and nowhere else: on the
                 # regenerate path no row is written, the surviving user row keeps

@@ -965,6 +965,63 @@ body.resizing {
   white-space: pre-wrap; /* pre-wrap on .bubble does not descend into a block child */
   overflow-wrap: anywhere;
 }
+/* Edit-and-resend: the user bubble turns into a textarea via the pencil button,
+   which is revealed on hover like the assistant footer actions. */
+.msg.user:hover .msg-actions,
+.msg.user .msg-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg.user.editing {
+  align-items: stretch;
+}
+.msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 82%;
+  margin-left: auto;
+}
+.msg-edit-input {
+  width: 100%;
+  min-height: 64px;
+  padding: 11px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius) var(--radius) 6px var(--radius);
+  background: var(--user-bubble);
+  color: var(--fg);
+  font-size: 14.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.msg-edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.msg-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.pill.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pill.primary:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.08);
+}
+.pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .stamp {
   color: var(--muted);
   font-size: 11px;

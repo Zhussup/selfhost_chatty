@@ -268,5 +268,55 @@ class SessionsTests(BaseTestCase):
         self.assertEqual(client.get("/api/sessions/nope/export.md").status_code, 404)
 
 
+class EditMessageTests(BaseTestCase):
+    """Edit-and-resend: rewrite a sent prompt in place and regenerate from it."""
+
+    def turn(self, client, content: str, sid: str | None = None, edit_id: str | None = None):
+        payload = {"model": "m", "content": content, "think": None, "use_tools": False}
+        if sid:
+            payload["session_id"] = sid
+        if edit_id:
+            payload["edit_message_id"] = edit_id
+        turns = [[
+            {"message": {"role": "assistant", "content": "answer"}, "done": False},
+            {"done": True, "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 1},
+        ]]
+        with mock.patch.object(chat_route, "stream_chat", ndjson_factory(turns)):
+            resp = client.post("/api/chat", json=payload)
+        events = [json.loads(ln) for ln in resp.text.splitlines() if ln.strip()]
+        return events[0]["session_id"]
+
+    def user_rows(self, client, sid: str) -> list[dict]:
+        full = client.get(f"/api/sessions/{sid}").json()
+        return [m for m in full["messages"] if m["role"] == "user"]
+
+    def test_edit_replaces_prompt_and_drops_the_tail(self):
+        client = TestClient(app)
+        login(client)
+        sid = self.turn(client, "first prompt")
+        first_id = self.user_rows(client, sid)[0]["id"]
+        self.turn(client, "second prompt", sid)  # a tail that the edit must discard
+
+        self.turn(client, "edited prompt", sid, edit_id=first_id)
+
+        rows = self.user_rows(client, sid)
+        self.assertEqual([r["content"] for r in rows], ["edited prompt"])
+        self.assertEqual(rows[0]["id"], first_id, "the row is rewritten, not replaced")
+        full = client.get(f"/api/sessions/{sid}").json()
+        self.assertEqual([m["role"] for m in full["messages"]], ["user", "assistant"])
+
+    def test_edit_ignores_non_user_ids(self):
+        client = TestClient(app)
+        login(client)
+        sid = self.turn(client, "keep me")
+        full = client.get(f"/api/sessions/{sid}").json()
+        assistant_id = next(m["id"] for m in full["messages"] if m["role"] == "assistant")
+
+        # an assistant id is not a user row: the edit no-ops, so nothing is
+        # rewritten and no new prompt is appended either
+        self.turn(client, "other", sid, edit_id=assistant_id)
+        self.assertEqual([r["content"] for r in self.user_rows(client, sid)], ["keep me"])
+
+
 if __name__ == "__main__":
     unittest.main()

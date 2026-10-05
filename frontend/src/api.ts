@@ -79,6 +79,8 @@ export interface ChatRequestBody {
   think: "low" | "medium" | "high" | null;
   use_tools: boolean;
   regenerate: boolean;
+  /** Edit-and-resend: rewrite this stored user message and drop what follows it. */
+  edit_message_id?: string;
 }
 
 /** Stream chat turns as NDJSON events. */
