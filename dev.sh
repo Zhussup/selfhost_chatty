@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Dev-режим: uvicorn --reload (бэкенд) + vite dev (фронт, hot-reload).
-# /api запросы вит dev-сервера проксируются к бэкенду (BACKEND_PORT).
-# Ctrl+C останавливает оба процесса.
+# Dev mode: uvicorn (backend) + vite dev (frontend). Vite reloads on frontend
+# edits; the backend has no --reload, so restart it after changing Python.
+# /api requests from the vite dev server are proxied to the backend (BACKEND_PORT).
+# Ctrl+C stops both processes.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -42,18 +43,18 @@ if ! port_free "$APP_PORT"; then
     if port_free "$p"; then APP_PORT=$p; break; fi
   done
   if [ "$APP_PORT" = "$ORIG" ]; then
-    echo "[ERR] все порты $ORIG-$((ORIG + 10)) заняты" >&2
+    echo "[ERR] every port in $ORIG-$((ORIG + 10)) is taken" >&2
     exit 1
   fi
-  echo "[WARN] порт $ORIG занят сторонним процессом — бэкенд на $APP_PORT" >&2
+  echo "[WARN] port $ORIG is taken by another process — backend on $APP_PORT" >&2
 fi
 
 echo "[dev] backend: http://localhost:$APP_PORT"
-echo "[dev] vite:    http://localhost:5173  (если занят, vite возьмёт следующий)"
+echo "[dev] vite:    http://localhost:5173  (if taken, vite picks the next one)"
 
 BACKEND_PORT="$APP_PORT" npm --prefix frontend run dev &
 VITE_PID=$!
 trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
 
-# uvicorn в foreground: Ctrl+C уходит ко всей группе (vite получит тоже), EXIT-trap добьёт остатки
+# uvicorn in the foreground: Ctrl+C reaches the whole group (vite gets it too), the EXIT-trap clears the rest
 "$VENV/bin/uvicorn" backend.app:app --host 0.0.0.0 --port "$APP_PORT"

@@ -64,7 +64,7 @@ export default function Message({
               }}
             />
             <div className="msg-edit-actions">
-              <span className="muted">Esc — отмена, Ctrl+Enter — отправить</span>
+              <span className="muted">Esc to cancel, Ctrl+Enter to resend</span>
               <button type="button" className="pill" onClick={() => setEditing(false)}>
                 Cancel
               </button>

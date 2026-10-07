@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Весь проект одной командой: venv → deps → фронт-билд (если нет dist) → uvicorn.
-#   ./run.sh                  — запуск (фронт соберётся сам, если его ещё нет)
-#   RUN_FRONTEND=1 ./run.sh   — принудительно пересобрать фронт перед стартом
-#   ./dev.sh                  — dev-режим с hot-reload (uvicorn --reload + vite)
+# The whole project in one command: venv -> deps -> frontend build (if dist is missing) -> uvicorn.
+#   ./run.sh                  — start (the frontend builds itself if it is not there yet)
+#   RUN_FRONTEND=1 ./run.sh   — force a frontend rebuild before starting
+#   ./dev.sh                  — dev mode (uvicorn + vite dev server)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -12,13 +12,13 @@ if [ ! -d "$VENV" ]; then
 fi
 "$VENV/bin/pip" install -q -r requirements.txt
 
-# фронт: install + build, если dist отсутствует (или RUN_FRONTEND=1 — пересборка)
+# frontend: install + build when dist is missing (or RUN_FRONTEND=1 — rebuild)
 if [ -f frontend/package.json ] && { [ ! -d frontend/dist ] || [ "${RUN_FRONTEND:-0}" = "1" ]; }; then
   npm --prefix frontend install --no-audit --no-fund
   npm --prefix frontend run build
 fi
 
-# порт: переменная окружения > .env > 8000; если занят — ближайший свободный
+# port: env var > .env > 8000; if taken — the nearest free one
 if [ -z "${APP_PORT:-}" ] && [ -f .env ]; then
   APP_PORT=$(grep -E '^APP_PORT=' .env | head -1 | cut -d= -f2- | tr -d ' "') || true
 fi
@@ -48,10 +48,10 @@ if ! port_free "$APP_PORT"; then
     if port_free "$p"; then APP_PORT=$p; break; fi
   done
   if [ "$APP_PORT" = "$ORIG" ]; then
-    echo "[ERR] все порты $ORIG-$((ORIG + 10)) заняты" >&2
+    echo "[ERR] every port in $ORIG-$((ORIG + 10)) is taken" >&2
     exit 1
   fi
-  echo "[WARN] порт $ORIG занят сторонним процессом — запускаюсь на $APP_PORT" >&2
+  echo "[WARN] port $ORIG is taken by another process — starting on $APP_PORT" >&2
 fi
 
 exec "$VENV/bin/uvicorn" backend.app:app --host 0.0.0.0 --port "$APP_PORT"

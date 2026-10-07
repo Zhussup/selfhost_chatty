@@ -1,8 +1,8 @@
-# секреты и состояние
+# secrets and state
 .env
 data/
 
-# venv, сборки, кэши
+# venv, builds, caches
 .venv/
 venv/
 node_modules/
@@ -12,10 +12,10 @@ __pycache__/
 .pytest_cache/
 .claude/
 
-# редакторы и ОС
+# editors and OS
 .vscode/
 .idea/
 *.swp
 .DS_Store
-# рантайм chatty (pid, лог, url)
+# chatty runtime (pid, log, url)
 .run/

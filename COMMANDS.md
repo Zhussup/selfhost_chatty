@@ -1,77 +1,82 @@
-# Команды проекта — шпаргалка
+# Project commands — cheat sheet
 
-## 1. Первый раз (уже сделано на этой машине)
+## 1. First time
 
 ```bash
 cd ~/Desktop/projects/selfhost_chat
-./setkey.sh               # спросит ключ с ollama.com/settings/keys и запишет в .env сам
-                          # (пароль входа можно задать в .env строкой AUTH_PASSWORD=...)
+./setkey.sh               # asks for the key from ollama.com/settings/keys and writes it to .env
+                          # (you can set the login password in .env as AUTH_PASSWORD=...)
 ```
 
-## 2. Запуск всего (одна команда из любого места)
+## 2. Run everything (one command from anywhere)
 
 ```bash
-chatty                    # поднимет сервер в фоне и откроет браузер
-chatty status             # запущен ли, на каком порту, отвечает ли
-chatty stop               # остановить
-chatty restart            # stop + запуск
-chatty logs               # tail -f лога фонового сервера
-chatty fg                 # в текущем терминале (Ctrl+C = стоп), как ./run.sh
+chatty                    # start the server in the background and open the browser
+chatty status             # is it up, on which port, does it answer
+chatty stop               # stop it
+chatty restart            # stop + start
+chatty logs               # tail -f the background server's log
+chatty fg                 # in the current terminal (Ctrl+C = stop), like ./run.sh
+chatty dev                # dev mode: uvicorn + vite (Ctrl+C stops both)
 ```
 
-- Ставится один раз: `./bin/chatty install` (симлинк в `~/.local/bin/chatty`)
-- Повторный `chatty` при живом сервере **не поднимает второй** — просто открывает вкладку
-- Запущенный не через chatty (`./run.sh` руками) он тоже находит и показывает
+- Installed once: `./bin/chatty install` (symlinks into `~/.local/bin/chatty`)
+- Running `chatty` again while a server is live does **not** start a second one — it just opens a tab
+- It also finds a server started by hand (`./run.sh`) and reports it
 
 ```bash
-./run.sh                  # то же самое, но в текущем терминале
-RUN_FRONTEND=1 ./run.sh   # принудительно пересобрать фронт (после правок src/)
+./run.sh                  # the same, but in the current terminal
+RUN_FRONTEND=1 ./run.sh   # force a frontend rebuild (after editing src/)
 ```
 
-- Порт: если 8000 занят (jupyterhub) — сам перескочит на свободный и напечатает
-  `[WARN] ... — запускаюсь на NNNN`; закрепить можно в .env строкой `APP_PORT=8001`
-- Рантайм chatty (pid, лог, url) — в `.run/`, в git не попадает
+- Port: if 8000 is taken (jupyterhub), it hops to a free one and prints
+  `[WARN] ... — starting on NNNN`; pin it in `.env` with `APP_PORT=8001`
+- chatty runtime (pid, log, url) lives in `.run/`, which is not committed
 
-## 3. Разработка без пересборок (hot-reload)
+## 3. Development without rebuilds
 
 ```bash
-./dev.sh                  # backend (uvicorn --reload) + vite dev одним Ctrl+C
+./dev.sh                  # backend + vite dev server, one Ctrl+C for both
 ```
 
-- Открывать **http://localhost:5173** (vite), /api уходит через прокси на бэкенд
-- Правки и бэкенда, и интерфейса подхватываются на лету; `Ctrl+C` гасит оба
+- Open **http://localhost:5173** (vite); `/api` is proxied to the backend
+- Frontend edits reload live. The backend runs **without** `--reload`, so restart
+  `./dev.sh` after changing Python — or add `--reload` to `dev.sh` if you want it
+  (it re-runs `db.init()` and re-imports the app on every edit)
 
-## 4. Остановка и зависшие процессы
+## 4. Stopping, and stuck processes
 
 ```bash
-chatty stop                               # фоновый сервер, поднятый через chatty
-# Ctrl+C в терминале, где запущен скрипт (./run.sh, ./dev.sh, chatty fg)
-pkill -f "uvicorn backend.app"            # если запущен не там / повис
-pkill -f vite                             # если повис дев-сервер фронта
+chatty stop                               # background server started through chatty
+# Ctrl+C in the terminal running the script (./run.sh, ./dev.sh, chatty fg)
+pkill -f "uvicorn backend.app"            # if it was started elsewhere / is hung
+pkill -f vite                             # if the frontend dev server is hung
 ```
 
-## 5. Тесты
+## 5. Tests
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests   # stubbed upstream, no API key needed
+npm --prefix frontend run build                  # typecheck + production build
 ```
 
-## 6. Проверка живого сервера
+## 6. Checking a live server
 
 ```bash
-curl localhost:8001/healthz
-grep '^AUTH_PASSWORD' .env                 # свой пароль для входа
+curl localhost:8000/healthz                # or whichever port chatty chose
+grep '^AUTH_PASSWORD' .env                 # your password, for logging in
+curl -sb cookies.txt localhost:8000/api/modes   # the chat mode registry
 ```
 
-## 7. Приборка с портом 8000 (по желанию)
+## 7. Cleaning up port 8000 (optional)
 
 ```bash
-sudo systemctl disable --now jupyterhub    # отключить узуратора порта навсегда
+sudo systemctl disable --now jupyterhub    # disable the squatter for good
 ```
 
-## 8. Данные
+## 8. Data
 
 ```bash
 .venv/bin/python -c "import sqlite3; sqlite3.connect('data/chat.db').execute('PRAGMA wal_checkpoint;')"
-cp data/chat.db ~/backups/chat-$(date +%F).db   # бэкап = копия файла
+cp data/chat.db ~/backups/chat-$(date +%F).db   # a backup is a copy of the file
 ```

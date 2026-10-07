@@ -24,11 +24,12 @@ def get_rows(sid="sess"):
 
 class PromptTests(BaseTestCase):
     def test_system_first_and_language(self):
-        add([{"role": "user", "content": "привет"}])
+        # a non-ASCII sample: also exercises the round-trip through SQLite
+        add([{"role": "user", "content": "café — ünicode"}])
         out = build_messages(list(get_rows()))
         self.assertEqual(out[0]["role"], "system")
         self.assertIn("Reply in the language", out[0]["content"])
-        self.assertEqual(out[1], {"role": "user", "content": "привет"})
+        self.assertEqual(out[1], {"role": "user", "content": "café — ünicode"})
 
     def test_quoted_user_row_becomes_blockquote(self):
         add([{"role": "user", "content": "explain this", "quote": "line one\n\nline two"}])

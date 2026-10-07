@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Смоук-консоль</title>
+<title>Smoke console</title>
 <style>
   :root { color-scheme: dark; }
   body { background:#0f1115; color:#c9d1d9; font:14px/1.5 ui-monospace,Menlo,monospace; max-width:720px; margin:0 auto; padding:24px 16px 64px; }
@@ -20,24 +20,24 @@
 </style>
 </head>
 <body>
-<h1>selfhost chat — бэкенд работает</h1>
-<p class="note">Временная смоук-консоль, пока frontend/dist не собран. API — под /api, авторизация — cookie после входа.</p>
+<h1>selfhost chat — the backend is up</h1>
+<p class="note">A temporary smoke console, shown until frontend/dist is built. The API lives under /api; authorization is a cookie issued on login.</p>
 
-<h2>Вход</h2>
-<div class="row"><input id="pw" type="password" placeholder="пароль (AUTH_PASSWORD из .env)"><button onclick="login()">войти</button></div>
+<h2>Login</h2>
+<div class="row"><input id="pw" type="password" placeholder="password (AUTH_PASSWORD from .env)"><button onclick="login()">log in</button></div>
 <pre id="log"></pre>
 
-<h2>Проверка API</h2>
+<h2>API checks</h2>
 <div class="row">
   <button onclick="get('/api/auth/me')">me</button>
-  <button onclick="get('/api/models')">модели</button>
-  <button onclick="get('/api/sessions')">сессии</button>
-  <button onclick="get('/api/stats/summary')">статистика</button>
+  <button onclick="get('/api/models')">models</button>
+  <button onclick="get('/api/sessions')">sessions</button>
+  <button onclick="get('/api/stats/summary')">stats</button>
 </div>
 
-<h2>Стрим чата (raw NDJSON)</h2>
-<div class="row"><input id="model" placeholder="модель, напр. gpt-oss:120b"></div>
-<div class="row"><input id="msg" placeholder="сообщение" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">отправить</button></div>
+<h2>Chat stream (raw NDJSON)</h2>
+<div class="row"><input id="model" placeholder="model, e.g. gpt-oss:120b"></div>
+<div class="row"><input id="msg" placeholder="message" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">send</button></div>
 <pre id="chat_out"></pre>
 
 <script>
@@ -54,11 +54,11 @@ async function login() {
     const r = await fetch('/api/auth/login', {method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({password: $('pw').value})});
     logged = r.ok;
-    log('log', r.ok ? 'вход выполнен — можно проверять API' : 'неверный пароль', r.ok);
+    log('log', r.ok ? 'logged in — API checks are live' : 'wrong password', r.ok);
   } catch (e) { log('log', String(e), false); }
 }
 async function get(url) {
-  if (!logged) return log('log', 'сначала войдите', false);
+  if (!logged) return log('log', 'log in first', false);
   try {
     const r = await fetch(url);
     let data = await r.json().catch(() => String(r.status));
@@ -67,13 +67,13 @@ async function get(url) {
   } catch (e) { log('log', String(e), false); }
 }
 async function chat() {
-  if (!logged) return log('chat_out', 'сначала войдите', false);
+  if (!logged) return log('chat_out', 'log in first', false);
   const out = $('chat_out'); const acc = []; out.textContent = '';
   try {
     const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({model: $('model').value, content: $('msg').value, think: null, use_tools: true})});
-    if (r.status === 409) return log('chat_out', '409: другой ход уже выполняется', false);
-    if (r.status === 401) { logged = false; return log('chat_out', '401: не авторизован', false); }
+    if (r.status === 409) return log('chat_out', '409: another turn is already running', false);
+    if (r.status === 401) { logged = false; return log('chat_out', '401: not authorized', false); }
     const reader = r.body.getReader(); const dec = new TextDecoder(); let text = '';
     for (;;) {
       const {done, value} = await reader.read();
@@ -83,12 +83,12 @@ async function chat() {
       const kinds = text.split('\n').filter(Boolean).map(l => {
         try { const o = JSON.parse(l); return o.t + ((o.name) ? ':' + o.name : ''); } catch { return 'raw'; }
       });
-      out.textContent = 'события: ' + kinds.join(' ') + '\n\n' + text;
+      out.textContent = 'events: ' + kinds.join(' ') + '\n\n' + text;
     }
   } catch (e) { out.textContent += '\n' + String(e); }
 }
 (async () => { try {
-  if ((await fetch('/api/auth/me')).ok) { logged = true; log('log', 'cookie уже действует — вход не нужен', true); }
+  if ((await fetch('/api/auth/me')).ok) { logged = true; log('log', 'cookie still valid — no login needed', true); }
 } catch {} })();
 </script>
 </body>
