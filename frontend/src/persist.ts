@@ -4,6 +4,7 @@
 // store subscription from firing on every stream delta.
 
 import {
+  DEFAULT_MODE,
   leafIds,
   makePane,
   parseNode,
@@ -33,12 +34,19 @@ interface PersistedPane {
   model: string;
   think: Think;
   useTools: boolean;
+  mode: string;
 }
 
 function persistedPanes(panes: Record<string, Pane>): Record<string, PersistedPane> {
   const out: Record<string, PersistedPane> = {};
   for (const [id, p] of Object.entries(panes)) {
-    out[id] = { sessionId: p.sessionId, model: p.model, think: p.think, useTools: p.useTools };
+    out[id] = {
+      sessionId: p.sessionId,
+      model: p.model,
+      think: p.think,
+      useTools: p.useTools,
+      mode: p.mode,
+    };
   }
   return out;
 }
@@ -96,6 +104,7 @@ export function loadLayout(): (LayoutState & { panes: Record<string, Pane> }) | 
     pane.sessionId = typeof p.sessionId === "string" ? p.sessionId : null;
     pane.think = p.think === "low" || p.think === "medium" || p.think === "high" ? p.think : null;
     pane.useTools = p.useTools !== false;
+    pane.mode = typeof p.mode === "string" && p.mode ? p.mode : DEFAULT_MODE;
     panes[id] = pane;
   }
   const focused = typeof s.focused === "string" && live.has(s.focused) ? s.focused : live.values().next().value!;

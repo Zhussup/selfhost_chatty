@@ -2,6 +2,9 @@ import type { FormEvent, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 import { usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
+import { modeById, parseSlash } from "../modes";
+import ConfirmDialog from "./ConfirmDialog";
+import ModePicker from "./ModePicker";
 import Icon from "./Icon";
 
 const SUGGESTIONS = [
@@ -17,22 +20,72 @@ const SUGGESTIONS = [
 export default function Composer({ empty = false }: { empty?: boolean }) {
   const paneId = usePaneId();
   const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  // A slash command that needs confirming: the typed text stays in the box
+  // until the user answers, so a cancel loses nothing.
+  const [pending, setPending] = useState<{ modeId: string; content: string; warn: string } | null>(
+    null
+  );
   const taRef = useRef<HTMLTextAreaElement>(null);
   const turn = usePane((p) => p.turn, null);
   const model = usePane((p) => p.model, "");
   const think = usePane((p) => p.think, null);
   const useTools = usePane((p) => p.useTools, true);
+  const mode = usePane((p) => p.mode, "assistant");
   const busy = usePane((p) => p.busy, false);
   const quote = usePane((p) => p.quote, null);
 
   const streaming = !!turn && !turn.done;
+  const modes = useStore((st) => st.modes);
+  const modeInfo = modeById(modes, mode);
+  // A mode that pins tool calling owns the toggle — clicking it would lie.
+  const toolsLocked = modeInfo ? modeInfo.tools !== "auto" : false;
+  const pendingTitle = pending ? (modeById(modes, pending.modeId)?.title ?? "this mode") : "";
+
+  const clear = () => {
+    setText("");
+    if (taRef.current) taRef.current.style.height = "auto";
+  };
 
   const submit = () => {
     const value = text.trim();
     if (!value || busy || !model) return;
-    setText("");
-    if (taRef.current) taRef.current.style.height = "auto";
+    setError("");
+
+    const slash = parseSlash(value, useStore.getState().modes);
+    if (slash?.kind === "unknown") {
+      setError(`Unknown mode: /${slash.token}`);
+      return; // keep the text so it can be corrected
+    }
+    if (slash?.kind === "mode") {
+      const already = useStore.getState().panes[paneId]?.mode === slash.mode.id;
+      if (slash.mode.warn && !already) {
+        setPending({ modeId: slash.mode.id, content: slash.content, warn: slash.mode.warn });
+        return; // nothing is sent or cleared until this is answered
+      }
+      useStore.getState().setMode(paneId, slash.mode.id);
+      if (!slash.content) {
+        clear(); // a bare "/fact" only switches persona
+        return;
+      }
+      clear();
+      useStore.getState().send(paneId, slash.content);
+      return;
+    }
+
+    clear();
     useStore.getState().send(paneId, value);
+  };
+
+  /** Answer the slash-path confirmation: apply and send, or keep the text. */
+  const resolve = (accept: boolean) => {
+    const p = pending;
+    setPending(null);
+    if (!p) return;
+    if (!accept) return; // the composer still holds what was typed
+    useStore.getState().setMode(paneId, p.modeId);
+    clear();
+    if (p.content) useStore.getState().send(paneId, p.content);
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -95,11 +148,17 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
           onChange={(e) => setText(e.target.value)}
         />
         <div className="composer-bar">
+          <ModePicker />
           <button
             type="button"
             className={useTools ? "icon on" : "icon"}
             onClick={() => useStore.getState().toggleTools(paneId)}
-            title="Toggle tool calling"
+            disabled={toolsLocked}
+            title={
+              toolsLocked
+                ? `Tools are fixed by ${modeInfo?.title} mode`
+                : "Toggle tool calling"
+            }
           >
             <Icon name="wrench" size={16} />
             <span className="hide-narrow">tools</span>
@@ -150,11 +209,20 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
           ))}
         </div>
       )}
-      {!empty && (
+      {error && <div className="composer-hint error">{error}</div>}
+      {!empty && !error && (
         <div className="composer-hint">
           <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
         </div>
       )}
+      <ConfirmDialog
+        open={!!pending}
+        title={`Switch to ${pendingTitle}?`}
+        body={pending?.warn ?? ""}
+        confirmLabel="Switch"
+        onConfirm={() => resolve(true)}
+        onCancel={() => resolve(false)}
+      />
     </form>
   );
 }

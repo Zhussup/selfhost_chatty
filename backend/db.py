@@ -101,6 +101,7 @@ MIGRATIONS: dict[int, str] = {
     # DDL already created would fail with "duplicate column name".
     # NOT NULL in ADD COLUMN needs the DEFAULT (SQLite requirement).
     2: "ALTER TABLE messages ADD COLUMN quote TEXT NOT NULL DEFAULT ''",
+    3: "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'assistant'",
 }
 
 

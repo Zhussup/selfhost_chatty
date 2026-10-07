@@ -25,6 +25,7 @@ from backend.ollama import (
     stream_chat,
 )
 from backend.prompt import build_messages
+from backend.modes import DEFAULT_MODE_ID, get_mode
 from backend.schemas import ChatIn
 from backend.tools import memory
 from backend.tools.registry import TOOL_SPECS, args_to_json, dispatch, preview
@@ -37,6 +38,15 @@ _PING_INTERVAL = 5.0
 _RETRY_AFTER_RATELIMIT = 3.0
 
 _NUDGE = "Tool budget reached. Answer now using any results and information you already have."
+
+# Sent when a tools-required mode (fact-check, research) answers without calling
+# anything. Only fires on a silent first pass: if the model already produced
+# prose, re-asking would stream a second answer onto the first.
+_SEARCH_NUDGE = (
+    "You have not used any tool yet. Before answering, call the appropriate tool — "
+    "web_search for facts that need checking, fetch_page for a page from the results — "
+    "and base your answer on what the tools return."
+)
 
 
 class _Busy(Exception):
@@ -271,16 +281,28 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
     try:
         async with _session_locks.setdefault(lock_key, asyncio.Lock()):
             # --- session bootstrap -------------------------------------------------
-            if session_id is None or not db.one("SELECT id FROM sessions WHERE id=?", (session_id,)):
+            existing = (
+                db.one("SELECT id, mode FROM sessions WHERE id=?", (session_id,))
+                if session_id is not None
+                else None
+            )
+            if existing is None:
                 session_id = db.new_id()
                 now = db.now()
                 title = body.content[:60] or "New chat"
+                mode_id = body.mode or DEFAULT_MODE_ID
                 db.qx(
-                    "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?,?,?,?,?)",
-                    (session_id, title, model, now, now),
+                    "INSERT INTO sessions (id, title, model, mode, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                    (session_id, title, model, mode_id, now, now),
                 )
             else:
+                # A request that names no mode keeps the session's own: an older
+                # client must not silently reset a Teacher chat to Assistant.
+                mode_id = body.mode or existing["mode"] or DEFAULT_MODE_ID
+                if body.mode and body.mode != existing["mode"]:
+                    db.qx("UPDATE sessions SET mode=? WHERE id=?", (mode_id, session_id))
                 _touch_session(session_id)
+            mode = get_mode(mode_id)
 
             yield _event({"t": "meta", "session_id": session_id, "message_id": message_id})
 
@@ -303,16 +325,23 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
                 (session_id,),
             )
             notes = memory.snapshot(settings.notes_snapshot_chars) if settings.notes_snapshot_chars else ""
-            messages = build_messages(list(rows), notes)
+            messages = build_messages(list(rows), notes, mode)
+            # The mode can pin tool use on or off regardless of the user's toggle.
+            tools_on = mode.tools == "on"
+            with_tools = tools_on or (mode.tools == "auto" and body.use_tools)
             base_payload: dict[str, Any] = {"model": model, "options": {"num_ctx": 16384}}
             if body.think is not None:
                 base_payload["think"] = body.think
-            if body.use_tools:
+            if with_tools:
                 base_payload["tools"] = TOOL_SPECS
 
             final_done = False
+            search_nudged = False
             for iteration in range(1, settings.tool_max_iter + 1):
-                budget_last = iteration == settings.tool_max_iter and body.use_tools
+                # keys off the effective policy, not body.use_tools: a forced-tools
+                # mode the user switched off would otherwise never hit the budget
+                # guardrail — exactly the mode that spends the most iterations
+                budget_last = iteration == settings.tool_max_iter and with_tools
                 if budget_last:
                     messages.append({"role": "user", "content": _NUDGE})
 
@@ -356,6 +385,13 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
                 })
 
                 if not tool_calls:
+                    # A tools-required mode that answered without calling anything
+                    # gets one re-ask, tools still attached. Only when it said
+                    # nothing at all — see _SEARCH_NUDGE.
+                    if tools_on and not content and not search_nudged and iteration < settings.tool_max_iter:
+                        search_nudged = True
+                        messages.append({"role": "user", "content": _SEARCH_NUDGE})
+                        continue
                     saved = True
                     _save_message(
                         session_id, "assistant", content,

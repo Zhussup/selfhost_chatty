@@ -326,6 +326,10 @@ function StreamingTurn({ turn, text }: { turn: ChatTurn; text: string }) {
 }
 
 function Welcome() {
+  const paneId = usePaneId();
+  const modes = useStore((st) => st.modes);
+  const mode = usePane((p) => p.mode, "assistant");
+
   return (
     <div className="welcome">
       <div className="welcome-mark">
@@ -336,6 +340,25 @@ function Welcome() {
         Self-hosted chat on Ollama Cloud. Tools available: web search, page reading, exact
         math, python, long-term memory.
       </p>
+      {modes.length > 0 && (
+        <>
+          <div className="welcome-modes-label">Or start in a mode</div>
+          <div className="welcome-modes">
+            {modes.map((m) => (
+              <button
+                type="button"
+                key={m.id}
+                className={m.id === mode ? "mode-chip active" : "mode-chip"}
+                title={m.hint}
+                onClick={() => useStore.getState().requestMode(paneId, m.id)}
+              >
+                <span className="mode-icon">{m.icon}</span>
+                {m.title}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

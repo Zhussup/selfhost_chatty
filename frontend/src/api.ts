@@ -2,6 +2,7 @@
 
 import type {
   DayPoint,
+  ModeInfo,
   ModelInfo,
   SessionFull,
   SessionInfo,
@@ -61,6 +62,16 @@ export const api = {
       })
     ),
   exportUrl: (id: string) => `/api/sessions/${id}/export.md`,
+  setSessionMode: (id: string, mode: string) =>
+    j<{ ok: boolean }>(
+      fetch(`/api/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      })
+    ),
+
+  modes: () => j<{ modes: ModeInfo[]; default: string }>(fetch("/api/modes")),
 
   models: () => j<{ models: ModelInfo[]; cached: boolean }>(fetch("/api/models")),
 
@@ -78,6 +89,8 @@ export interface ChatRequestBody {
   quote?: string | null;
   think: "low" | "medium" | "high" | null;
   use_tools: boolean;
+  /** Persona for this dialog. Omitted only by callers that have none. */
+  mode?: string;
   regenerate: boolean;
   /** Edit-and-resend: rewrite this stored user message and drop what follows it. */
   edit_message_id?: string;

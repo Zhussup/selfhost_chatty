@@ -7,11 +7,13 @@
 
 import { create } from "zustand";
 import { api, streamChat, type ChatRequestBody } from "./api";
-import type { MessageRow, ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
+import type { MessageRow, ModeInfo, ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
 import { clearLayout, loadLayout } from "./persist";
+import { modeById } from "./modes";
 import type { ExportEntry } from "./export";
 import {
   clamp,
+  DEFAULT_MODE,
   findNeighbor,
   firstLeaf,
   insertSplit,
@@ -36,6 +38,11 @@ interface StoreState {
   activeTab: "chat" | "stats";
   sessions: SessionInfo[];
   models: ModelInfo[];
+  /** The mode registry, fetched once per login (see loadModes). */
+  modes: ModeInfo[];
+  /** A mode switch waiting on the user's confirmation, when the target mode
+   *  carries a warning. Null otherwise. */
+  pendingMode: { paneId: string; modeId: string } | null;
 
   panes: Record<string, Pane>;
   root: PaneNode;
@@ -51,6 +58,7 @@ interface StoreState {
   logout: () => Promise<void>;
   loadSessions: () => Promise<void>;
   loadModels: () => Promise<void>;
+  loadModes: () => Promise<void>;
   hydratePanes: () => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
@@ -71,6 +79,13 @@ interface StoreState {
   setModel: (paneId: string, name: string) => void;
   cycleThink: (paneId: string) => void;
   toggleTools: (paneId: string) => void;
+  /** Switch mode outright, ignoring any warning the mode carries. */
+  setMode: (paneId: string, modeId: string) => void;
+  /** Switch mode, asking for confirmation first when the mode wants one. This
+   *  is what every user-facing surface calls, so they cannot drift apart. */
+  requestMode: (paneId: string, modeId: string) => void;
+  /** Answer the pending confirmation: true applies the switch. */
+  resolveMode: (accept: boolean) => void;
 
   /** Open a conversation in the print-only document (PDF via the print dialog). */
   printDoc: (title: string, entries: ExportEntry[]) => void;
@@ -86,6 +101,8 @@ interface StoreState {
 
 const THINK_CYCLE: Think[] = [null, "low", "medium", "high"];
 const abortStore: Record<string, AbortController> = {};
+/** Registry cache: lets a transient /api/modes failure still render the picker. */
+const MODES_KEY = "chat.modes.v1";
 
 const firstId = newPaneId();
 
@@ -138,6 +155,7 @@ export const useStore = create<StoreState>((set, get) => {
       /* sidebar stays empty; retried on the next session action */
     }
     await get().loadModels(); // swallows its own errors
+    await get().loadModes(); // ditto — the UI degrades without the registry
     await get().hydratePanes(); // swallows per-pane errors
   };
 
@@ -147,6 +165,8 @@ export const useStore = create<StoreState>((set, get) => {
     activeTab: "chat",
     sessions: [],
     models: [],
+    modes: [],
+    pendingMode: null,
 
     panes: { [firstId]: makePane(firstId) },
     root: leaf(firstId),
@@ -205,6 +225,28 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
+    loadModes: async () => {
+      try {
+        const { modes } = await api.modes();
+        set({ modes });
+        try {
+          localStorage.setItem(MODES_KEY, JSON.stringify(modes));
+        } catch {
+          /* storage may be unavailable */
+        }
+        return;
+      } catch {
+        /* fall back to the cached registry below */
+      }
+      let cached: unknown = null;
+      try {
+        cached = JSON.parse(localStorage.getItem(MODES_KEY) ?? "null");
+      } catch {
+        /* unreadable cache */
+      }
+      if (Array.isArray(cached) && cached.length) set({ modes: cached as ModeInfo[] });
+    },
+
     hydratePanes: async () => {
       const ids = Object.values(get().panes)
         .filter((p) => p.sessionId)
@@ -221,7 +263,13 @@ export const useStore = create<StoreState>((set, get) => {
               return {
                 panes: {
                   ...s.panes,
-                  [pid]: { ...p, history: full.messages, model: p.model || full.session.model },
+                  // the session row owns the mode: it survives a PATCH the layout never saw
+                  [pid]: {
+                    ...p,
+                    history: full.messages,
+                    model: p.model || full.session.model,
+                    mode: full.session.mode || DEFAULT_MODE,
+                  },
                 },
               };
             });
@@ -273,7 +321,12 @@ export const useStore = create<StoreState>((set, get) => {
         return {
           panes: {
             ...s.panes,
-            [paneId]: { ...p, history: full.messages, model: p.model || full.session.model },
+            [paneId]: {
+              ...p,
+              history: full.messages,
+              model: p.model || full.session.model,
+              mode: full.session.mode || DEFAULT_MODE,
+            },
           },
         };
       });
@@ -406,6 +459,7 @@ export const useStore = create<StoreState>((set, get) => {
         ...(quote ? { quote } : {}),
         think: pane.think,
         use_tools: pane.useTools,
+        mode: pane.mode,
         regenerate,
         ...(editId ? { edit_message_id: editId } : {}),
       };
@@ -533,6 +587,44 @@ export const useStore = create<StoreState>((set, get) => {
       patch(paneId, (p) => ({ useTools: !p.useTools }));
     },
 
+    setMode: (paneId, modeId) => {
+      const info = modeById(get().modes, modeId);
+      patch(paneId, () => ({
+        mode: modeId,
+        // The mode's reasoning default applies at switch time; null is "no
+        // opinion", so the level the user picked is left alone.
+        ...(info?.think ? { think: info.think } : {}),
+        // A mode that pins tools also pins the toggle, so the button keeps
+        // telling the truth about what will be sent.
+        ...(info && info.tools !== "auto" ? { useTools: info.tools === "on" } : {}),
+      }));
+      const sid = get().panes[paneId]?.sessionId;
+      if (sid) {
+        // Persist immediately so a reload before the next turn keeps the mode.
+        void api.setSessionMode(sid, modeId).catch(() => {
+          /* the mode still travels with the next turn */
+        });
+      }
+    },
+
+    requestMode: (paneId, modeId) => {
+      const pane = get().panes[paneId];
+      // re-picking the active mode is a no-op — and must not re-ask
+      if (!pane || pane.mode === modeId) return;
+      const info = modeById(get().modes, modeId);
+      if (info?.warn) {
+        set({ pendingMode: { paneId, modeId } });
+        return;
+      }
+      get().setMode(paneId, modeId);
+    },
+
+    resolveMode: (accept) => {
+      const pending = get().pendingMode;
+      set({ pendingMode: null });
+      if (accept && pending) get().setMode(pending.paneId, pending.modeId);
+    },
+
     printDoc: (title, entries) => {
       if (entries.length) set({ printJob: { title, entries } });
     },
@@ -546,7 +638,12 @@ export const useStore = create<StoreState>((set, get) => {
       const src = panes[paneId];
       if (!src || leafCount(root) >= MAX_PANES) return;
       const nid = newPaneId();
-      const np: Pane = { ...makePane(nid, src.model), think: src.think, useTools: src.useTools };
+      const np: Pane = {
+        ...makePane(nid, src.model),
+        think: src.think,
+        useTools: src.useTools,
+        mode: src.mode,
+      };
       set({ root: insertSplit(root, paneId, nid, dir), panes: { ...panes, [nid]: np }, focusedPaneId: nid });
     },
 

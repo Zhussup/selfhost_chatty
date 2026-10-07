@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from backend import auth as auth_mod
 from backend import db
+from backend.modes import get_mode
 from backend.schemas import SessionPatch
 
 router = APIRouter(prefix="/sessions", dependencies=[Depends(auth_mod.require_user)])
@@ -19,7 +20,9 @@ def _touch(session_id: str) -> None:
 
 @router.get("")
 async def list_sessions() -> list[dict]:
-    rows = db.q("SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 200")
+    rows = db.q(
+        "SELECT id, title, model, mode, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 200"
+    )
     return [dict(r) for r in rows]
 
 
@@ -29,16 +32,25 @@ async def create_session(body: dict | None = None) -> dict:
     now = db.now()
     sid = db.new_id()
     db.qx(
-        "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?,?,?,?,?)",
-        (sid, body.get("title") or "New chat", body.get("model") or "", now, now),
+        "INSERT INTO sessions (id, title, model, mode, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+        (
+            sid,
+            body.get("title") or "New chat",
+            body.get("model") or "",
+            get_mode(body.get("mode")).id,
+            now,
+            now,
+        ),
     )
-    row = db.one("SELECT id, title, model, created_at, updated_at FROM sessions WHERE id=?", (sid,))
+    row = db.one("SELECT id, title, model, mode, created_at, updated_at FROM sessions WHERE id=?", (sid,))
     return dict(row)
 
 
 @router.get("/{session_id}")
 async def get_session(session_id: str) -> dict:
-    srow = db.one("SELECT id, title, model, created_at, updated_at FROM sessions WHERE id=?", (session_id,))
+    srow = db.one(
+        "SELECT id, title, model, mode, created_at, updated_at FROM sessions WHERE id=?", (session_id,)
+    )
     if srow is None:
         raise HTTPException(status_code=404, detail="session not found")
     mrows = db.q(
@@ -62,10 +74,15 @@ async def get_session(session_id: str) -> dict:
 
 
 @router.patch("/{session_id}")
-async def rename_session(session_id: str, body: SessionPatch) -> dict:
+async def update_session(session_id: str, body: SessionPatch) -> dict:
+    """Rename and/or re-mode. Partial on purpose: `title` used to be written
+    unconditionally, which would now try `SET title=NULL` on a mode-only patch."""
     if not db.one("SELECT id FROM sessions WHERE id=?", (session_id,)):
         raise HTTPException(status_code=404, detail="session not found")
-    db.qx("UPDATE sessions SET title=? WHERE id=?", (body.title, session_id))
+    if body.title is not None:
+        db.qx("UPDATE sessions SET title=? WHERE id=?", (body.title, session_id))
+    if body.mode is not None:
+        db.qx("UPDATE sessions SET mode=? WHERE id=?", (body.mode, session_id))
     return {"ok": True}
 
 

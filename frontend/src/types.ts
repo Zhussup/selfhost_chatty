@@ -34,6 +34,8 @@ export interface SessionInfo {
   id: string;
   title: string;
   model: string;
+  /** Mode id this dialog runs under; see ModeInfo. */
+  mode: string;
   created_at: number;
   updated_at: number;
 }
@@ -41,6 +43,22 @@ export interface SessionInfo {
 export interface SessionFull {
   session: SessionInfo;
   messages: MessageRow[];
+}
+
+/** One persona from the backend registry (GET /api/modes). */
+export interface ModeInfo {
+  id: string;
+  title: string;
+  hint: string;
+  /** A single emoji, rendered as text — deliberately not an IconName. */
+  icon: string;
+  tools: "auto" | "on" | "off";
+  /** Applied to the pane on switch; null means "no opinion, leave it alone". */
+  think: "low" | "medium" | "high" | null;
+  /** Extra slash-command tokens besides the id. */
+  aliases: string[];
+  /** Confirmation shown before switching into this mode; "" for most. */
+  warn: string;
 }
 
 // --- stream events (t = type) -----------------------------------------------

@@ -4,19 +4,18 @@ import json
 from typing import Any
 
 from backend.config import settings
+from backend.modes import Mode, soft_rules
 
 
-def system_prompt(notes: str = "") -> str:
+def system_prompt(notes: str = "", mode: Mode | None = None) -> str:
     from datetime import datetime
 
     today = datetime.now().strftime("%Y-%m-%d (%A)")
-    parts = [
-        f"Today is {today}.",
-        "Reply in the language the user writes in.",
-        "You have tools available. Use web_search for facts you are unsure about or that may be recent, "
-        "and fetch_page to read a specific URL from search results. Use calc for any non-trivial arithmetic "
-        "and python for computations or short scripts. Keep tool use purposeful — one search is usually enough.",
-    ]
+    # Order matters: the frame (date), then the rules that survive the mode, then
+    # the mode's own block, and the user's notes last of all.
+    parts = [f"Today is {today}.", *soft_rules(mode)]
+    if mode is not None and mode.block:
+        parts.append(mode.block)
     if notes:
         parts.append(f"Long-term notes the user asked you to remember:\n{notes}")
     return "\n\n".join(parts)
@@ -43,9 +42,9 @@ def _quote_prefix(quote: str) -> str:
     return "\n".join(f"> {line}" if line.strip() else ">" for line in lines) + "\n\n"
 
 
-def build_messages(rows: list, notes: str = "") -> list[dict[str, Any]]:
+def build_messages(rows: list, notes: str = "", mode: Mode | None = None) -> list[dict[str, Any]]:
     """Rows ordered oldest->newest, already filtered to last N; system injected fresh at the top."""
-    out: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(notes)}]
+    out: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(notes, mode)}]
     for r in rows:
         role = r["role"]
         if role == "system":

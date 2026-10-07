@@ -17,6 +17,8 @@ export interface Pane {
   model: string;
   think: Think;
   useTools: boolean;
+  /** Persona id from the mode registry (see backend/modes.py). */
+  mode: string;
   busy: boolean;
   /** Pending quote for the next message — a fragment picked out of an answer.
    *  null = none. Not persisted: it is composer state, like the typed text. */
@@ -48,6 +50,8 @@ export interface Rect {
 }
 
 export const MAX_PANES = 6;
+/** Persona a fresh pane starts in — mirrors backend/modes.DEFAULT_MODE_ID. */
+export const DEFAULT_MODE = "assistant";
 /** Capture cap for a picked quote — must stay under the backend's max_length. */
 export const MAX_QUOTE_CHARS = 1600;
 export const MIN_RATIO = 0.08;
@@ -71,6 +75,7 @@ export function makePane(id: string, model = ""): Pane {
     model,
     think: null,
     useTools: true,
+    mode: DEFAULT_MODE,
     busy: false,
     quote: null,
   };

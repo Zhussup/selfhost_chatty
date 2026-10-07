@@ -5,6 +5,8 @@ import Dashboard from "./components/Dashboard";
 import Sidebar from "./components/Sidebar";
 import Icon from "./components/Icon";
 import PrintDoc from "./components/PrintDoc";
+import ConfirmDialog from "./components/ConfirmDialog";
+import { modeById } from "./modes";
 import { useStore } from "./state";
 
 const RAIL_KEY = "chat.rail";
@@ -70,7 +72,29 @@ export default function App() {
         <TabBody />
       </main>
       <PrintDoc />
+      <ModeConfirm />
     </div>
+  );
+}
+
+/** The mode switch waiting on a confirmation, when its target carries a warning.
+ *  Lives here rather than in the picker so the welcome chips and the dropdown
+ *  share one dialog; the composer mounts its own for the slash-command path,
+ *  where the typed text has to survive a cancel. */
+function ModeConfirm() {
+  const pending = useStore((st) => st.pendingMode);
+  const modes = useStore((st) => st.modes);
+  const info = pending ? modeById(modes, pending.modeId) : null;
+  if (!pending || !info) return null;
+  return (
+    <ConfirmDialog
+      open
+      title={`Switch to ${info.title}?`}
+      body={info.warn}
+      confirmLabel="Switch"
+      onConfirm={() => useStore.getState().resolveMode(true)}
+      onCancel={() => useStore.getState().resolveMode(false)}
+    />
   );
 }
 
