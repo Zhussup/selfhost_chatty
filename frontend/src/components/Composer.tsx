@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent } from "react";
+import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 import { usePane, usePaneId } from "./PaneContext";
 import { useStore } from "../state";
@@ -6,6 +6,7 @@ import { modeById, parseSlash } from "../modes";
 import ConfirmDialog from "./ConfirmDialog";
 import ModePicker from "./ModePicker";
 import Icon from "./Icon";
+import { formatBytes, MAX_ATTACHMENTS, processImageFiles, type ProcessedImage } from "../image";
 
 const SUGGESTIONS = [
   "Search the web for today's news",
@@ -20,13 +21,22 @@ const SUGGESTIONS = [
 export default function Composer({ empty = false }: { empty?: boolean }) {
   const paneId = usePaneId();
   const [text, setText] = useState("");
+  const [images, setImages] = useState<ProcessedImage[]>([]);
   const [error, setError] = useState("");
+  const [dragging, setDragging] = useState(false);
   // A slash command that needs confirming: the typed text stays in the box
-  // until the user answers, so a cancel loses nothing.
-  const [pending, setPending] = useState<{ modeId: string; content: string; warn: string } | null>(
-    null
-  );
+  // until the user answers, so a cancel loses nothing. Attached images are held
+  // here too — a confirmation must not silently eat them.
+  const [pending, setPending] = useState<{
+    modeId: string;
+    content: string;
+    warn: string;
+    images: ProcessedImage[];
+  } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // dragenter/dragleave fire for every child element; count depth instead
+  const dragDepth = useRef(0);
   const turn = usePane((p) => p.turn, null);
   const model = usePane((p) => p.model, "");
   const think = usePane((p) => p.think, null);
@@ -41,15 +51,50 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
   // A mode that pins tool calling owns the toggle — clicking it would lie.
   const toolsLocked = modeInfo ? modeInfo.tools !== "auto" : false;
   const pendingTitle = pending ? (modeById(modes, pending.modeId)?.title ?? "this mode") : "";
+  // undefined means the model list has not arrived (or an older server does not
+  // report capabilities) — that is not a "no", so it must not block attaching.
+  const vision = useStore((st) => st.models.find((m) => m.name === model)?.vision);
+  const blind = vision === false;
+  const canAttach = !!model && !busy && !blind;
 
   const clear = () => {
     setText("");
+    setImages([]);
     if (taRef.current) taRef.current.style.height = "auto";
+  };
+
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    if (blind) {
+      setError(`${model} can't see images — pick a vision-capable model first`);
+      return;
+    }
+    setError("");
+    const room = Math.max(0, MAX_ATTACHMENTS - images.length);
+    if (room === 0) {
+      setError(`${MAX_ATTACHMENTS} images per message is the limit`);
+      return;
+    }
+    const { images: added, errors } = await processImageFiles(files, room);
+    if (added.length) setImages((prev) => [...prev, ...added].slice(0, MAX_ATTACHMENTS));
+    if (errors.length) setError(errors.join(", "));
+  };
+
+  const removeImage = (index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+    taRef.current?.focus();
+  };
+
+  /** Send and empty the composer. Images are passed explicitly: `clear()` empties
+   *  the state, so reading `images` after it would lose them. */
+  const sendNow = (content: string, imgs: ProcessedImage[]) => {
+    clear();
+    useStore.getState().send(paneId, content, imgs.length ? { images: imgs } : undefined);
   };
 
   const submit = () => {
     const value = text.trim();
-    if (!value || busy || !model) return;
+    if ((!value && images.length === 0) || busy || !model) return;
     setError("");
 
     const slash = parseSlash(value, useStore.getState().modes);
@@ -60,21 +105,24 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
     if (slash?.kind === "mode") {
       const already = useStore.getState().panes[paneId]?.mode === slash.mode.id;
       if (slash.mode.warn && !already) {
-        setPending({ modeId: slash.mode.id, content: slash.content, warn: slash.mode.warn });
+        setPending({
+          modeId: slash.mode.id,
+          content: slash.content,
+          warn: slash.mode.warn,
+          images,
+        });
         return; // nothing is sent or cleared until this is answered
       }
       useStore.getState().setMode(paneId, slash.mode.id);
-      if (!slash.content) {
+      if (!slash.content && images.length === 0) {
         clear(); // a bare "/fact" only switches persona
         return;
       }
-      clear();
-      useStore.getState().send(paneId, slash.content);
+      sendNow(slash.content, images);
       return;
     }
 
-    clear();
-    useStore.getState().send(paneId, value);
+    sendNow(value, images);
   };
 
   /** Answer the slash-path confirmation: apply and send, or keep the text. */
@@ -84,8 +132,11 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
     if (!p) return;
     if (!accept) return; // the composer still holds what was typed
     useStore.getState().setMode(paneId, p.modeId);
-    clear();
-    if (p.content) useStore.getState().send(paneId, p.content);
+    if (!p.content && p.images.length === 0) {
+      clear();
+      return;
+    }
+    sendNow(p.content, p.images);
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -98,6 +149,41 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
       e.preventDefault();
       submit();
     }
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length) {
+      e.preventDefault(); // a pasted image is an attachment, not a filename in the text
+      void addFiles(files);
+    }
+  };
+
+  const carriesFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
+  const onDragEnter = (e: DragEvent) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    if (!canAttach) return;
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+
+  const onDragOver = (e: DragEvent) => {
+    if (carriesFiles(e)) e.preventDefault(); // without this the browser opens the file
+  };
+
+  const onDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  };
+
+  const onDrop = (e: DragEvent) => {
+    dragDepth.current = 0;
+    setDragging(false);
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    void addFiles(Array.from(e.dataTransfer.files));
   };
 
   const autoGrow = (el: HTMLTextAreaElement) => {
@@ -116,10 +202,18 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
     });
   };
 
+  const canSend = !busy && !(!text.trim() && images.length === 0) && !!model && !(blind && images.length > 0);
+
   return (
     <form className="composer" onSubmit={onSubmit}>
       {/* DOM index 0 in every state — never insert a sibling before this card */}
-      <div className="composer-card">
+      <div
+        className={dragging ? "composer-card dragover" : "composer-card"}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         {quote && (
           <div className="composer-quote">
             <Icon name="quote" size={13} />
@@ -137,6 +231,24 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
             </button>
           </div>
         )}
+        {images.length > 0 && (
+          <div className="composer-attachments">
+            {images.map((img, i) => (
+              <div className="composer-attachment" key={`${img.name}-${i}`}>
+                <img src={img.dataUrl} alt={img.name} />
+                <button
+                  type="button"
+                  className="icon"
+                  title={`Remove ${img.name}`}
+                  onClick={() => removeImage(i)}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+                <span className="composer-attachment-size">{formatBytes(img.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={taRef}
           placeholder={model ? `Message ${model}…` : "Pick a model first…"}
@@ -144,10 +256,37 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
           value={text}
           disabled={busy && !streaming}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           onInput={(e) => autoGrow(e.target as HTMLTextAreaElement)}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="composer-bar">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = ""; // so the same file can be picked again
+              void addFiles(files);
+            }}
+          />
+          <button
+            type="button"
+            className="icon"
+            onClick={() => fileRef.current?.click()}
+            disabled={!canAttach}
+            title={
+              blind
+                ? `${model} can't see images — pick a vision-capable model`
+                : `Attach images (up to ${MAX_ATTACHMENTS})`
+            }
+          >
+            <Icon name="paperclip" size={16} />
+            <span className="hide-narrow">image</span>
+          </button>
           <ModePicker />
           <button
             type="button"
@@ -188,12 +327,7 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
               <Icon name="stop" size={16} />
             </button>
           ) : (
-            <button
-              type="submit"
-              className="send"
-              title="Send"
-              disabled={busy || !text.trim() || !model}
-            >
+            <button type="submit" className="send" title="Send" disabled={!canSend}>
               <Icon name="send" size={18} />
             </button>
           )}
@@ -210,9 +344,15 @@ export default function Composer({ empty = false }: { empty?: boolean }) {
         </div>
       )}
       {error && <div className="composer-hint error">{error}</div>}
-      {!empty && !error && (
+      {!empty && !error && blind && model && (
         <div className="composer-hint">
-          <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
+          {model} is text-only — images need a vision-capable model
+        </div>
+      )}
+      {!empty && !error && !(blind && model) && (
+        <div className="composer-hint">
+          <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line · paste or drop
+          images to attach
         </div>
       )}
       <ConfirmDialog

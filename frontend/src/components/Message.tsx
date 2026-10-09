@@ -4,6 +4,7 @@ import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
 import MsgActions from "./MsgActions";
 import Icon from "./Icon";
+import { imageUrl } from "../api";
 import { entriesFromHistory } from "../export";
 import type { ChipData } from "./ToolChip";
 import type { MessageRow } from "../types";
@@ -80,10 +81,30 @@ export default function Message({
       <div className="msg user">
         <div className="bubble">
           {msg.quote ? <div className="bubble-quote">{msg.quote}</div> : null}
+          {msg.images && msg.images.length > 0 && (
+            // Only metadata lives in the session payload; the bytes come from
+            // /api/images and the browser lazily fetches them as they scroll in.
+            <div className="bubble-images">
+              {msg.images.map((im) => (
+                <a
+                  key={im.id}
+                  className="bubble-image"
+                  href={imageUrl(im.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={im.name || "Attached image"}
+                >
+                  <img src={imageUrl(im.id)} alt={im.name || "Attached image"} loading="lazy" />
+                </a>
+              ))}
+            </div>
+          )}
           {msg.content}
         </div>
         <div className="stamp">{timeStr(msg.created_at)}</div>
-        {onEdit && (
+        {/* An image-only prompt has no text to edit — editing it would resend an
+            empty content, which the server rejects. The images stay on the row. */}
+        {onEdit && !!msg.content && (
           <div className="msg-actions user-actions">
             <button
               type="button"

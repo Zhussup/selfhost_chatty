@@ -9,13 +9,14 @@ from fastapi.staticfiles import StaticFiles
 from backend import db
 from backend.auth import require_user
 from backend.config import settings
-from backend.routes import auth_routes, chat, modes, models, sessions, stats
+from backend.routes import auth_routes, chat, images, modes, models, sessions, stats
 
 app = FastAPI(title="selfhost_chat", docs_url=None, redoc_url=None)
 
 api = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 api.include_router(modes.router)
 api.include_router(models.router)
+api.include_router(images.router)
 api.include_router(sessions.router)
 api.include_router(stats.router)
 

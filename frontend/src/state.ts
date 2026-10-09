@@ -10,6 +10,7 @@ import { api, streamChat, type ChatRequestBody } from "./api";
 import type { MessageRow, ModeInfo, ModelInfo, SessionInfo, StreamEvent, ToolCall } from "./types";
 import { clearLayout, loadLayout } from "./persist";
 import { modeById } from "./modes";
+import type { AttachableImage } from "./image";
 import type { ExportEntry } from "./export";
 import {
   clamp,
@@ -69,7 +70,7 @@ interface StoreState {
   send: (
     paneId: string,
     content: string,
-    opts?: { regenerate?: boolean; quote?: string; edit_message_id?: string }
+    opts?: { regenerate?: boolean; quote?: string; edit_message_id?: string; images?: AttachableImage[] }
   ) => Promise<void>;
   editMessage: (paneId: string, messageId: string, text: string) => void;
   retry: (paneId: string) => void;
@@ -352,6 +353,9 @@ export const useStore = create<StoreState>((set, get) => {
 
       const regenerate = opts?.regenerate === true;
       const editId = opts?.edit_message_id;
+      // Regenerate never carries images: the stored user row already owns them,
+      // and the backend ignores the field on that path anyway.
+      const images = regenerate ? [] : opts?.images ?? [];
       // Regenerate never carries a quote: the stored user row already owns one
       // (and the backend ignores the field on that path anyway).
       const quote = regenerate ? "" : opts?.quote !== undefined ? opts.quote : (pane.quote ?? "");
@@ -364,6 +368,17 @@ export const useStore = create<StoreState>((set, get) => {
           // On regenerate the user row is already in history, so an optimistic
           // bubble would echo it twice.
           user_text: regenerate ? "" : content,
+          // In-flight thumbnails come from the client's own copy: nothing is
+          // persisted yet, so there is no /api/images id to point at.
+          images: regenerate
+            ? []
+            : images.map((i) => ({
+                dataUrl: i.dataUrl,
+                base64: i.base64,
+                name: i.name,
+                width: i.width,
+                height: i.height,
+              })),
           quote,
           think_text: "",
           text: "",
@@ -456,6 +471,16 @@ export const useStore = create<StoreState>((set, get) => {
         session_id: pane.sessionId,
         model,
         content,
+        ...(images.length
+          ? {
+              images: images.map((i) => ({
+                data: i.base64,
+                name: i.name,
+                width: i.width,
+                height: i.height,
+              })),
+            }
+          : {}),
         ...(quote ? { quote } : {}),
         think: pane.think,
         use_tools: pane.useTools,
@@ -536,21 +561,25 @@ export const useStore = create<StoreState>((set, get) => {
         // was never persisted (409 / pre-stream error), so it has to be resent
         // as a normal message — regenerating would truncate against an older
         // exchange and the model would answer the wrong prompt.
-        if (!turn.user_text) return;
+        if (!turn.user_text && turn.images.length === 0) return;
         // The quote travels with the resent prompt — picking up whatever chip is
         // pending in the composer would retry a different message than the one
         // that failed. Regenerate reads the stored row instead, so no quote here.
-        if (turn.session_id === "") get().send(paneId, turn.user_text, { quote: turn.quote });
+        // Images travel too: the failed turn never persisted them.
+        if (turn.session_id === "")
+          get().send(paneId, turn.user_text, { quote: turn.quote, images: turn.images });
         else get().send(paneId, turn.user_text, { regenerate: true });
         return;
       }
 
       // History only: the last user row is what the backend truncates after.
-      // It rejects empty content, so retry is unavailable without it.
+      // An image-only prompt has no text but is still a valid thing to regenerate.
       for (let i = pane.history.length - 1; i >= 0; i--) {
         const m = pane.history[i];
         if (m.role === "user") {
-          if (m.content) get().send(paneId, m.content, { regenerate: true });
+          if (m.content || (m.images?.length ?? 0) > 0) {
+            get().send(paneId, m.content, { regenerate: true });
+          }
           return;
         }
       }

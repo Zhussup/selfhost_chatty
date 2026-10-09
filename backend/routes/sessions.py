@@ -70,6 +70,28 @@ async def get_session(session_id: str) -> dict:
             d["tool_calls"] = None
         del d["tool_calls_json"]
         msgs.append(d)
+    # Attachment metadata only — the browser fetches the bytes lazily from
+    # /api/images/{id}, so a message list stays small however many photos it holds.
+    ids = [m["id"] for m in msgs]
+    by_message: dict[str, list[dict]] = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for r in db.q(
+            f"SELECT id, message_id, mime, name, width, height FROM message_images "
+            f"WHERE message_id IN ({marks}) ORDER BY message_id, sort",
+            tuple(ids),
+        ):
+            by_message.setdefault(r["message_id"], []).append(
+                {
+                    "id": r["id"],
+                    "mime": r["mime"],
+                    "name": r["name"],
+                    "width": r["width"],
+                    "height": r["height"],
+                }
+            )
+    for m in msgs:
+        m["images"] = by_message.get(m["id"], [])
     return {"session": dict(srow), "messages": msgs}
 
 
@@ -103,18 +125,31 @@ async def export_md(session_id: str) -> PlainTextResponse:
     # created_at is read below for the stamps — it must be selected (sqlite3.Row
     # raises IndexError on a column the query did not return).
     rows = db.q(
-        "SELECT role, content, quote, thinking, tool_calls_json, tool_name, created_at FROM messages "
+        "SELECT id, role, content, quote, thinking, tool_calls_json, tool_name, created_at FROM messages "
         "WHERE session_id=? ORDER BY sort",
         (session_id,),
     )
+    # Images are referenced by URL, never inlined as base64: a conversation with a
+    # few dozen photos would otherwise export to a multi-megabyte .md. The link
+    # resolves while the app runs and the reader is logged in.
+    image_refs: dict[str, list[tuple[str, str]]] = {}
+    for r in db.q(
+        "SELECT message_id, id, name FROM message_images WHERE message_id IN "
+        "(SELECT id FROM messages WHERE session_id=?) ORDER BY message_id, sort",
+        (session_id,),
+    ):
+        image_refs.setdefault(r["message_id"], []).append((r["id"], r["name"]))
     parts = [f"# {srow['title']}", ""]
     for r in rows:
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["created_at"]))
+        attached = image_refs.get(r["id"], [])
         if r["role"] == "user":
             parts += [f"## You · {stamp}", ""]
             quoted = (r["quote"] or "").strip()
             if quoted:
                 parts += ["> " + "\n> ".join(quoted.splitlines()), ""]
+            for image_id, image_name in attached:
+                parts += [f"![{image_name or 'image'}](/api/images/{image_id})", ""]
             parts += [r["content"], ""]
         elif r["role"] == "assistant":
             parts += [f"## Assistant · {stamp}", ""]

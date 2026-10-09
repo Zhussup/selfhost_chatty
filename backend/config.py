@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     image_max_total_bytes: int = 12_000_000
     # /api/show capabilities (which models see images) change about never.
     vision_cache_ttl: int = 21600
+    # Image ids are UUIDs and bytes never change: safe to cache for a year.
+    image_serve_max_age: int = 31_536_000
 
     pyexec_timeout: int = 8
     pyexec_network: bool = True

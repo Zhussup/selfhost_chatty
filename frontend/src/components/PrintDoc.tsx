@@ -82,6 +82,13 @@ function PrintEntry({ entry }: { entry: ExportEntry }) {
       <section className="print-msg print-user">
         <div className="print-who">You · {fmtStamp(entry.stamp)}</div>
         {entry.quote ? <div className="print-quote">{entry.quote}</div> : null}
+        {entry.images?.length ? (
+          <div className="print-images">
+            {entry.images.map((im, i) => (
+              <img key={i} src={im.src} alt={im.name} />
+            ))}
+          </div>
+        ) : null}
         <div className="print-body">{entry.text}</div>
       </section>
     );

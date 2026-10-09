@@ -241,6 +241,24 @@ function MessageList() {
           <div className="msg user">
             <div className="bubble">
               {turn.quote ? <div className="bubble-quote">{turn.quote}</div> : null}
+              {turn.images.length > 0 && (
+                // Thumbnails straight from the processed file: the row is not
+                // persisted yet, so there is no id to fetch the bytes back by.
+                <div className="bubble-images">
+                  {turn.images.map((im, i) => (
+                    <a
+                      key={`${im.name}-${i}`}
+                      className="bubble-image"
+                      href={im.dataUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={im.name}
+                    >
+                      <img src={im.dataUrl} alt={im.name} />
+                    </a>
+                  ))}
+                </div>
+              )}
               {turn.user_text}
             </div>
           </div>
@@ -274,9 +292,11 @@ function MessageList() {
 }
 
 /** The prompt is shown right away — but not when the turn never reached the
- *  server (e.g. 409 rate_limited), where nothing was persisted to show. */
+ *  server (e.g. 409 rate_limited), where nothing was persisted to show. An
+ *  image-only prompt has no text but still needs its bubble. */
 function showUserBubble(turn: ChatTurn): boolean {
-  return !!turn.user_text && (turn.session_id !== "" || !turn.error);
+  const hasPrompt = !!turn.user_text || turn.images.length > 0;
+  return hasPrompt && (turn.session_id !== "" || !turn.error);
 }
 
 function StreamingTurn({ turn, text }: { turn: ChatTurn; text: string }) {

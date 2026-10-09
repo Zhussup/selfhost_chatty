@@ -31,7 +31,8 @@ def fresh_db() -> None:
     db.init()
     with db._lock:
         db.conn().executescript(
-            "DELETE FROM messages; DELETE FROM requests; DELETE FROM tool_calls; DELETE FROM notes; DELETE FROM sessions;"
+            "DELETE FROM message_images; DELETE FROM messages; DELETE FROM requests; "
+            "DELETE FROM tool_calls; DELETE FROM notes; DELETE FROM sessions;"
         )
         db.conn().commit()
 

@@ -21,6 +21,7 @@ into `frontend/dist` and served by the backend at `/`.
 - **Reasoning level** per pane: off → low → medium → high
 - **Split panes** — several conversations side by side, layout persisted locally
 - **Quote-reply** from a selection, **edit & resend**, **retry** the last answer
+- **Photos** — attach, paste or drop up to 6 images on a vision-capable model
 - **Export** a conversation as Markdown or PDF
 - **Dashboard** over `/api/stats/*`: tokens, tool use, top models, session counts
 
@@ -98,6 +99,26 @@ Three ways to switch, all going through the same store action so they cannot dri
    *and* sends the text; the command never reaches the bubble or the history)
 3. the chips on the empty-chat screen
 
+## Photos
+
+Attach images with the paperclip, paste them, or drop them on the composer — up to 6 per
+message, text optional. They are resized in the browser (longest side 1568 px, WebP) before
+upload, so a phone photo costs a fraction of the original.
+
+Only models that can actually see them accept a photo. `GET /api/models` reports each
+model's `capabilities` from Ollama's `/api/show`, and the picker marks the ones with
+`vision`; on a text-only model the attach button is disabled and the server answers
+`vision_unsupported` rather than silently sending bytes the model would ignore. If
+`/api/show` can't be reached the capability is unknown and the send is allowed through —
+upstream then gives its own error instead of the app blocking a valid request.
+
+The bytes live in the `message_images` table in the same `data/chat.db` (so the backup
+promise above still holds), are served back by an auth-guarded `GET /api/images/{id}` with
+a long `Cache-Control`, and are deleted with their message via `ON DELETE CASCADE`.
+Every image inside the history window is re-sent on each turn, so a follow-up like "and in
+the second photo?" works. `export.md` links to `/api/images/{id}` instead of inlining
+base64.
+
 ## API
 
 All of it behind the auth cookie.
@@ -107,16 +128,19 @@ All of it behind the auth cookie.
 | `POST` | `/api/auth/login` \| `/logout` | cookie in / out (`/api/auth/me` to check) |
 | `POST` | `/api/chat` | NDJSON turn stream (`delta` → `thinking` → `tools` → `usage` → `done`) |
 | `GET` | `/api/modes` | the mode registry, with the warning text filled in |
-| `GET` | `/api/models` | available models |
+| `GET` | `/api/models` | available models, each with `capabilities` / `vision` |
+| `GET` | `/api/images/{id}` | one attached image, bytes as stored |
 | `GET` `POST` | `/api/sessions` | list / create (`title`, `model`, `mode`) |
 | `GET` `PATCH` `DELETE` | `/api/sessions/{id}` | read / rename & re-mode (both partial) / delete |
 | `GET` | `/api/sessions/{id}/export.md` | the conversation as Markdown |
 | `GET` | `/api/stats/summary` \| `/timeseries` \| `/top-models` \| `/tools` \| `/sessions` | dashboard data |
 | `GET` | `/healthz` | liveness, no auth |
 
-`POST /api/chat` body: `{model, content, use_tools, think?, mode?, session_id?, quote?}`.
+`POST /api/chat` body: `{model, content, use_tools, think?, mode?, session_id?, quote?, images?}`.
 Omitting `mode` keeps the session's stored mode; sending one persists it. An unknown
-mode is a `422` rather than a silent fallback.
+mode is a `422` rather than a silent fallback. `images` is a list of `{data, name?, width?,
+height?}` where `data` is raw base64 (no `data:` prefix); the format is sniffed from the
+bytes, not trusted from the client, and `content` may be empty when images are present.
 
 ## Smoke-test with curl
 
@@ -163,3 +187,7 @@ live. The backend runs without `--reload`, so restart `./dev.sh` after changing 
 
 Real HTTPS out front through a caddy/nginx reverse proxy in front of uvicorn, plus
 `COOKIE_SECURE=true` in `.env`.
+
+Photo uploads need headroom in the proxy: nginx caps request bodies at 1 MB by default,
+which a few images will exceed. Raise `client_max_body_size` (each image is capped at
+`IMAGE_MAX_BYTES`, 4 MB, and a message at 12 MB).

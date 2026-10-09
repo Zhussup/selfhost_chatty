@@ -6,7 +6,16 @@
 // The markdown here deliberately mirrors backend/routes/sessions.py:export_md,
 // so a file exported from the UI reads the same as the sidebar's export.
 
+import { imageUrl } from "./api";
 import type { ChatTurn, MessageRow } from "./types";
+
+/** A photo attached to a prompt, already reduced to something an <img> can take. */
+export interface ExportImage {
+  /** `/api/images/{id}` once the row is persisted; a `data:` URL for a turn that
+   *  is still in flight and has no id to fetch the bytes back by. */
+  src: string;
+  name: string;
+}
 
 export interface ExportEntry {
   role: "user" | "assistant" | "tool";
@@ -15,6 +24,8 @@ export interface ExportEntry {
   thinking?: string;
   /** fragment of an earlier answer this prompt replies to */
   quote?: string;
+  /** photos attached to this prompt */
+  images?: ExportImage[];
   /** tool name (role === "tool") */
   name?: string;
   /** tool success flag (role === "tool") — false renders as a failed call */
@@ -61,6 +72,9 @@ export function entriesFromHistory(messages: MessageRow[]): ExportEntry[] {
       text: m.content,
       thinking: m.thinking || undefined,
       quote: m.quote || undefined,
+      images: m.images?.length
+        ? m.images.map((im) => ({ src: imageUrl(im.id), name: im.name || "image" }))
+        : undefined,
       name: m.tool_name ?? undefined,
       ok: m.role === "tool" ? !m.error : undefined,
       stamp: m.created_at,
@@ -73,8 +87,18 @@ export function entriesFromHistory(messages: MessageRow[]): ExportEntry[] {
 /** The in-flight exchange, so the dialog export works mid-stream too. */
 export function entriesFromTurn(turn: ChatTurn): ExportEntry[] {
   const out: ExportEntry[] = [];
-  if (turn.user_text) {
-    out.push({ role: "user", text: turn.user_text, quote: turn.quote || undefined });
+  if (turn.user_text || turn.images.length > 0) {
+    out.push({
+      role: "user",
+      text: turn.user_text,
+      quote: turn.quote || undefined,
+      // Not persisted yet, so these carry their data: URLs — the only case where
+      // an export inlines image bytes. Exporting after the turn finishes links
+      // to /api/images instead.
+      images: turn.images.length
+        ? turn.images.map((im) => ({ src: im.dataUrl, name: im.name || "image" }))
+        : undefined,
+    });
   }
   for (const t of turn.tools) {
     out.push({ role: "tool", name: t.name, text: t.result, ok: t.ok ?? undefined });
@@ -93,6 +117,9 @@ export function entriesToMarkdown(title: string, entries: ExportEntry[]): string
       parts.push(`## You · ${stamp}`, "");
       const quoted = (e.quote ?? "").trim();
       if (quoted) parts.push("> " + quoted.split("\n").join("\n> "), "");
+      // Same shape backend/routes/sessions.py:export_md writes: a reference, never
+      // inlined bytes, so a photo-heavy chat stays a small text file.
+      for (const im of e.images ?? []) parts.push(`![${im.name}](${im.src})`, "");
       parts.push(e.text, "");
     } else if (e.role === "assistant") {
       parts.push(`## Assistant · ${stamp}`, "");

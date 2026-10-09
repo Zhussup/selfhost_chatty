@@ -86,6 +86,8 @@ export interface ChatRequestBody {
   session_id: string | null;
   model: string;
   content: string;
+  /** Photos for this prompt: raw base64, no data: prefix. */
+  images?: { data: string; name?: string; width?: number; height?: number }[];
   quote?: string | null;
   think: "low" | "medium" | "high" | null;
   use_tools: boolean;
@@ -95,6 +97,9 @@ export interface ChatRequestBody {
   /** Edit-and-resend: rewrite this stored user message and drop what follows it. */
   edit_message_id?: string;
 }
+
+/** A stored attachment's bytes. Same-origin, so the auth cookie rides along. */
+export const imageUrl = (id: string): string => `/api/images/${id}`;
 
 /** Stream chat turns as NDJSON events. */
 export async function streamChat(

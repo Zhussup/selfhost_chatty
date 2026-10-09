@@ -44,6 +44,7 @@ export default function ModelPicker() {
     <div className="model-picker" ref={ref}>
       <button className="picker-btn" onClick={() => setOpen((v) => !v)}>
         <span className="picker-name">{current ? current.name : model || "loading models…"}</span>
+        {current?.vision && <span className="picker-badge">vision</span>}
         <Icon name="chevronDown" size={14} className="chev" />
       </button>
       {open && (
@@ -67,7 +68,12 @@ export default function ModelPicker() {
                 }}
               >
                 <span className="pinfo">
-                  <span className="pname">{m.name}</span>
+                  <span className="prow">
+                    <span className="pname">{m.name}</span>
+                    {/* The models that accept photos; the rest are text-only and
+                        the composer refuses to attach on them. */}
+                    {m.vision && <span className="picker-badge">vision</span>}
+                  </span>
                   <span className="picker-sub">{subtitle(m)}</span>
                 </span>
                 {m.name === model && (

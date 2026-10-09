@@ -297,9 +297,29 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
     message_id = db.new_id()
     partial_content = ""
     partial_thinking = ""    # cancellation-safe accumulators
+    image_records: list[dict[str, Any]] = []
     lock_key = body.session_id or "__new__"
 
     try:
+        # Validation comes first, before the per-session lock and before any row is
+        # written: a refused send must not leave a session, a message or an image.
+        if body.images:
+            can_see = await vision.is_vision(model)
+            # None means the capability is unknown (the /api/show probe failed).
+            # Fail open there — upstream reports the real problem far more clearly
+            # than a false "this model cannot read images" would.
+            if can_see is False:
+                yield _event(_err_event(
+                    "vision_unsupported",
+                    f"{model} cannot read images — switch to a vision-capable model",
+                ))
+                return
+            try:
+                image_records = attachments.decode_images(body.images)
+            except ImageError as exc:
+                yield _event(_err_event(exc.code, exc.message))
+                return
+
         async with _session_locks.setdefault(lock_key, asyncio.Lock()):
             # --- session bootstrap -------------------------------------------------
             existing = (
@@ -310,7 +330,7 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
             if existing is None:
                 session_id = db.new_id()
                 now = db.now()
-                title = body.content[:60] or "New chat"
+                title = body.content[:60] or ("Photo" if image_records else "New chat")
                 mode_id = body.mode or DEFAULT_MODE_ID
                 db.qx(
                     "INSERT INTO sessions (id, title, model, mode, created_at, updated_at) VALUES (?,?,?,?,?,?)",
@@ -337,16 +357,37 @@ async def _run_turn(body: ChatIn) -> AsyncIterator[str]:
                 # The request's `quote` is read here and nowhere else: on the
                 # regenerate path no row is written, the surviving user row keeps
                 # its own quote, and build_messages rebuilds the blockquote from it.
-                _save_message(session_id, "user", body.content, quote=(body.quote or "").strip()[:2000])
+                # Attachments are deliberately NOT re-read on edit-and-resend: the
+                # stored row keeps its own images, exactly as it keeps its quote.
+                _save_message(
+                    session_id, "user", body.content,
+                    quote=(body.quote or "").strip()[:2000],
+                    images=image_records,
+                )
 
             # --- upstream history ----------------------------------------------
             rows = db.q(
-                "SELECT role, content, quote, thinking, tool_calls_json, tool_call_id, tool_name FROM messages "
+                "SELECT id, role, content, quote, thinking, tool_calls_json, tool_call_id, tool_name FROM messages "
                 "WHERE session_id=? ORDER BY sort",
                 (session_id,),
             )
+            # Images for the whole window are re-sent every turn, so a follow-up
+            # ("and in the second one?") still works. Fetched as one lookup keyed by
+            # message id rather than a JOIN, which would duplicate user rows.
+            user_ids = [r["id"] for r in rows if r["role"] == "user"]
+            images_map: dict[str, list[str]] = {}
+            if user_ids:
+                marks = ",".join("?" * len(user_ids))
+                for image_row in db.q(
+                    f"SELECT message_id, bytes FROM message_images WHERE message_id IN ({marks}) "
+                    "ORDER BY message_id, sort",
+                    tuple(user_ids),
+                ):
+                    images_map.setdefault(image_row["message_id"], []).append(
+                        base64.b64encode(image_row["bytes"]).decode("ascii")
+                    )
             notes = memory.snapshot(settings.notes_snapshot_chars) if settings.notes_snapshot_chars else ""
-            messages = build_messages(list(rows), notes, mode)
+            messages = build_messages(list(rows), notes, mode, images=images_map)
             # The mode can pin tool use on or off regardless of the user's toggle.
             tools_on = mode.tools == "on"
             with_tools = tools_on or (mode.tools == "auto" and body.use_tools)

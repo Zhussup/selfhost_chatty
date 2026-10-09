@@ -5,6 +5,9 @@ export interface ModelInfo {
   family: string;
   size: number;
   modified: string;
+  /** True when upstream /api/show lists the "vision" capability. Absent from older servers. */
+  vision?: boolean;
+  capabilities?: string[];
 }
 
 export interface ToolCall {
@@ -13,12 +16,34 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/** A stored attachment. The bytes are fetched lazily from /api/images/{id}. */
+export interface ImageRef {
+  id: string;
+  mime: string;
+  name: string;
+  width: number;
+  height: number;
+}
+
+/** An attachment still in flight: not persisted yet, so it carries its own preview. */
+export interface TurnImage {
+  /** object URL or data URL, for the optimistic thumbnail */
+  dataUrl: string;
+  /** raw base64, resent as-is when a failed turn is retried */
+  base64: string;
+  name: string;
+  width: number;
+  height: number;
+}
+
 export interface MessageRow {
   id: string;
   session_id: string;
   role: "system" | "user" | "assistant" | "tool";
   sort: number;
   content: string;
+  /** Photos attached to this message; [] when none. */
+  images?: ImageRef[];
   /** Fragment of a previous answer this message replies to ("" when none). */
   quote: string;
   thinking: string;
@@ -79,6 +104,8 @@ export interface ChatTurn {
   message_id: string; // "" until meta arrives
   session_id: string;
   user_text: string; // the prompt just sent — rendered optimistically until the turn is persisted
+  /** Thumbnails for the in-flight turn; empty on regenerate (the row is already in history). */
+  images: TurnImage[];
   quote: string; // the fragment that prompt replies to ("" when none)
   think_text: string;
   text: string;

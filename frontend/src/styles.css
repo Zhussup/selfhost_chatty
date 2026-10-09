@@ -857,6 +857,24 @@ body.resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.picker-item .prow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Marks the models that accept photo attachments. */
+.picker-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .picker-sub {
   display: block;
   color: var(--muted);
@@ -964,6 +982,36 @@ body.resizing {
   line-height: 1.5;
   white-space: pre-wrap; /* pre-wrap on .bubble does not descend into a block child */
   overflow-wrap: anywhere;
+}
+/* Photos on this prompt. The bubble only carries metadata; the bytes come from
+   /api/images/{id} and load lazily as they scroll into view. */
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.bubble-images:last-child {
+  margin-bottom: 0; /* an image-only prompt needs no gap under the strip */
+}
+.bubble-image {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  line-height: 0; /* no descender gap under the image */
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  transition: filter 0.14s ease;
+}
+.bubble-image:hover {
+  filter: brightness(1.06);
+}
+.bubble-image img {
+  display: block;
+  width: 100%;
+  height: 165px;
+  object-fit: cover;
 }
 /* Edit-and-resend: the user bubble turns into a textarea via the pencil button,
    which is revealed on hover like the assistant footer actions. */
@@ -1524,6 +1572,62 @@ details.thinking[open] summary::before {
   height: 20px;
   padding: 0 3px;
 }
+/* Photos waiting to be sent, inside the card above the textarea. */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.composer-attachment {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.composer-attachment img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.composer-attachment .icon {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 6px;
+  /* Reads on any photo, in either theme. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+.composer-attachment .icon:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+.composer-attachment-size {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 4px;
+  text-align: center;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+}
+/* A file is being dragged over the composer. */
+.composer-card.dragover {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 .composer textarea {
   display: block;
   width: 100%;
@@ -2063,6 +2167,20 @@ details.thinking[open] summary::before {
     padding-left: 10px;
     border-left: 3px solid var(--border-strong);
     color: var(--muted);
+  }
+  .print-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 8px;
+  }
+  .print-images img {
+    /* Two per row, never wider than the text block, page break friendly. */
+    max-width: 46%;
+    max-height: 240px;
+    object-fit: contain;
+    border-radius: 6px;
+    border: 1px solid var(--border);
   }
   .print-thinking {
     margin-bottom: 8px;

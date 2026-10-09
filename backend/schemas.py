@@ -67,8 +67,12 @@ class ChatIn(BaseModel):
 
     @model_validator(mode="after")
     def _content_or_images(self) -> "ChatIn":
-        """An image-only message is legal; a completely empty one is not."""
-        if not self.content.strip() and not self.images:
+        """An image-only message is legal; a completely empty one is not.
+
+        Regenerate is exempt: it sends no content of its own and answers from the
+        stored row, which may itself be an image-only prompt.
+        """
+        if not self.content.strip() and not self.images and not self.regenerate:
             raise ValueError("content is required unless images are attached")
         return self
 
