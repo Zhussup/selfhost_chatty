@@ -7,6 +7,7 @@ Unknown `t` values must be ignored by clients (forward compatible).
 """
 
 import asyncio
+import base64
 import json
 import time
 from typing import Any, AsyncIterator
@@ -14,8 +15,9 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from backend import auth as auth_mod
-from backend import db
+from backend import attachments, auth as auth_mod
+from backend import db, vision
+from backend.attachments import ImageError
 from backend.config import settings
 from backend.ollama import (
     OllamaAuthError,
@@ -83,6 +85,7 @@ def _save_message(
     tool_name: str | None = None,
     error: str | None = None,
     model: str | None = None,
+    images: list[dict[str, Any]] | None = None,
 ) -> str:
     mid = message_id or db.new_id()
     db.qx(
@@ -104,6 +107,24 @@ def _save_message(
             db.now(),
         ),
     )
+    # Attachments live in their own table and cascade with the message row, so
+    # edit-and-resend, regenerate and session delete clean them up for free.
+    for i, image in enumerate(images or ()):
+        db.qx(
+            "INSERT INTO message_images (id, message_id, mime, name, width, height, bytes, sort, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                db.new_id(),
+                mid,
+                image["mime"],
+                image.get("name", ""),
+                image.get("width", 0),
+                image.get("height", 0),
+                image["bytes"],
+                i,
+                db.now(),
+            ),
+        )
     _touch_session(session_id)
     return mid
 

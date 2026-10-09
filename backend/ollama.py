@@ -133,3 +133,25 @@ async def list_models() -> list[dict[str, Any]]:
         for m in models
         if m.get("name") or m.get("model")
     ]
+
+
+async def model_capabilities(name: str) -> list[str]:
+    """POST /api/show -> capabilities, e.g. ["completion","tools","vision"].
+
+    This is the only place vision support is advertised: /api/tags has no
+    capabilities field and its details.family is empty on ollama.com. Returns []
+    on any per-model failure — one unknown model must not sink the whole list.
+    """
+    url = f"{settings.ollama_base_url.rstrip('/')}/api/show"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), **_client_kwargs()) as client:
+            resp = await client.post(url, json={"model": name}, headers=headers())
+            if resp.status_code >= 400:
+                return []
+            data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+    caps = data.get("capabilities") if isinstance(data, dict) else None
+    if not isinstance(caps, list):
+        return []
+    return [str(c) for c in caps]

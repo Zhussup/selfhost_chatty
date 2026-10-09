@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     history_max_messages: int = 40
     notes_snapshot_chars: int = 500
 
+    # Image attachments. The client already downscales to 1568px/WebP, so these
+    # caps are a guard against a stale or hostile client, not the normal path.
+    image_max_count: int = 6
+    image_max_bytes: int = 4_000_000
+    image_max_total_bytes: int = 12_000_000
+    # /api/show capabilities (which models see images) change about never.
+    vision_cache_ttl: int = 21600
+
     pyexec_timeout: int = 8
     pyexec_network: bool = True
 

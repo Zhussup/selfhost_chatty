@@ -42,8 +42,19 @@ def _quote_prefix(quote: str) -> str:
     return "\n".join(f"> {line}" if line.strip() else ">" for line in lines) + "\n\n"
 
 
-def build_messages(rows: list, notes: str = "", mode: Mode | None = None) -> list[dict[str, Any]]:
-    """Rows ordered oldest->newest, already filtered to last N; system injected fresh at the top."""
+def build_messages(
+    rows: list,
+    notes: str = "",
+    mode: Mode | None = None,
+    images: dict[str, list[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Rows ordered oldest->newest, already filtered to last N; system injected fresh at the top.
+
+    `images` maps message id -> base64 list. It is a lookup rather than a JOIN in
+    the caller: a user row can own several images, and joining would duplicate rows
+    and break both the sort order and the tool-run trim below. Rows without an id
+    (tests build them by hand) simply contribute no images.
+    """
     out: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(notes, mode)}]
     for r in rows:
         role = r["role"]
@@ -54,7 +65,12 @@ def build_messages(rows: list, notes: str = "", mode: Mode | None = None) -> lis
             quote = _field(r, "quote").strip()
             if quote:
                 content = _quote_prefix(quote[:2000]) + content
-            out.append({"role": "user", "content": content})
+            msg: dict[str, Any] = {"role": "user", "content": content}
+            if images:
+                attached = images.get(_field(r, "id"))
+                if attached:
+                    msg["images"] = list(attached)
+            out.append(msg)
         elif role == "assistant":
             msg: dict[str, Any] = {"role": "assistant", "content": r["content"] or ""}
             if r["tool_calls_json"]:

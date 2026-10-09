@@ -58,6 +58,23 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, sort);
 
+-- Image attachments for a user message. Bytes are stored raw (no base64): the
+-- browser uploads base64 inside the /api/chat JSON, the server decodes once, and
+-- encodes again only when talking to Ollama. ON DELETE CASCADE covers session
+-- delete, edit-and-resend and regenerate — there is nothing on disk to clean up.
+CREATE TABLE IF NOT EXISTS message_images (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  width INTEGER NOT NULL DEFAULT 0,
+  height INTEGER NOT NULL DEFAULT 0,
+  bytes BLOB NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_message_images_msg ON message_images(message_id, sort);
+
 CREATE TABLE IF NOT EXISTS requests (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -102,6 +119,23 @@ MIGRATIONS: dict[int, str] = {
     # NOT NULL in ADD COLUMN needs the DEFAULT (SQLite requirement).
     2: "ALTER TABLE messages ADD COLUMN quote TEXT NOT NULL DEFAULT ''",
     3: "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'assistant'",
+    # Same CREATE TABLE IF NOT EXISTS text as DDL: init() always runs DDL first, so on
+    # an old DB the table already exists by the time this step runs — idempotent, and
+    # user_version still advances for anyone reading the pragma.
+    4: (
+        "CREATE TABLE IF NOT EXISTS message_images ("
+        "id TEXT PRIMARY KEY,"
+        "message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,"
+        "mime TEXT NOT NULL DEFAULT '',"
+        "name TEXT NOT NULL DEFAULT '',"
+        "width INTEGER NOT NULL DEFAULT 0,"
+        "height INTEGER NOT NULL DEFAULT 0,"
+        "bytes BLOB NOT NULL,"
+        "sort INTEGER NOT NULL DEFAULT 0,"
+        "created_at INTEGER NOT NULL"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_message_images_msg ON message_images(message_id, sort);"
+    ),
 }
 
 
