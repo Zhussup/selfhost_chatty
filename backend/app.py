@@ -25,6 +25,12 @@ app.include_router(auth_routes.router)
 app.include_router(chat.router)
 app.include_router(api)
 
+# before the static mount: a "/" mount catches every path, so anything defined
+# after it would never match (healthcheck is the CLI's model-default probe)
+@app.get("/healthz")
+async def healthz() -> dict:
+    return {"ok": True, "model_default": settings.default_model or None}
+
 # init DB schema at import so the first request never races the DDL
 db.init()
 
@@ -39,8 +45,3 @@ else:
     @app.get("/", include_in_schema=False)
     async def root_console() -> HTMLResponse:
         return HTMLResponse(_console)
-
-
-@app.get("/healthz")
-async def healthz() -> dict:
-    return {"ok": True, "model_default": settings.default_model or None}

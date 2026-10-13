@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chatty-cli"
+version = "0.1.0"
+description = "Terminal client for chatty (selfhost chat): streaming REPL and one-shot ask"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28",
+    "rich>=13",
+]
+
+[project.scripts]
+chatty-cli = "chatty_cli.__main__:main"
+
+# Explicit on purpose: backend/ is an importable package too, so flat-layout
+# auto-discovery would refuse (or worse, silently swallow backend). Only the
+# client ships in the wheel.
+[tool.setuptools]
+packages = ["chatty_cli"]

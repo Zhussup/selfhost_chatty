@@ -34,7 +34,8 @@ chatty                 # from anywhere: starts the server in the background, ope
 ```
 
 `chatty` also takes `stop` / `restart` / `status` / `logs` / `fg` (foreground in the
-current terminal, Ctrl+C to stop). Without installing it, from the project root:
+current terminal, Ctrl+C to stop) — and the terminal client commands from
+[the next section](#terminal-client). Without installing it, from the project root:
 
 ```bash
 ./run.sh          # backend; APP_PORT comes from .env (8000 by default)
@@ -118,6 +119,41 @@ a long `Cache-Control`, and are deleted with their message via `ON DELETE CASCAD
 Every image inside the history window is re-sent on each turn, so a follow-up like "and in
 the second photo?" works. `export.md` links to `/api/images/{id}` instead of inlining
 base64.
+
+## Terminal client
+
+`chatty` is more than a service wrapper: `ask` / `chat` / `sessions` / `export` is a
+terminal client over the same API — same login, same sessions, same 16 modes.
+
+```bash
+chatty ask "one question, one answer"        # the answer streams into the terminal
+echo doc.txt | chatty ask "summarise"        # pipes work: stdin becomes the prompt
+chatty ask "why is 8000 slow?" > notes.md    # stdout is the answer and nothing else
+chatty chat                                  # REPL: /modes /model /think /img /sessions /help
+chatty sessions                              # recent conversations, numbered
+chatty export 1 out.md                       # one conversation as markdown
+```
+
+`ask`/`chat`/`sessions`/`export` reuse a running server or start one silently in the
+background (nothing opens). Status lines, the footer (`done · 5.5s · 876 tok · session …`)
+and errors go to stderr, so redirects and pipes stay clean. Exit codes: `0` ok,
+`1` error, `2` bad args/config, `130` interrupted. Slash commands mirror the web UI:
+`/teacher`, `/fact "text"` (switches *and* sends), `/think high`, `/img photo.jpg` —
+`/help` lists them all.
+
+Without the project checked out, install the wheel from GitHub Releases and point it at
+your server:
+
+```bash
+pip install https://github.com/Zhussup/selfhost_chatty/releases/latest/download/chatty_cli-0.1.0-py3-none-any.whl
+chatty-cli chat   # the standalone command is chatty-cli; bare invocation opens the REPL
+```
+
+It resolves config like the wrapper does, plus works with any server: `--url` /
+`CHATTY_URL` / the project's `.run/chatty.url` / `http://localhost:8000`, and the
+password from `--password` / `CHATTY_PASSWORD` / the project's `.env` / an interactive
+prompt (argv passwords land in shell history — prefer the env var or let it ask).
+Images via `--img photo.png`, models via `chatty-cli models`.
 
 ## API
 

@@ -11,8 +11,15 @@
 #   chatty logs       tail the background server's log (tail -f)
 #   chatty install    put itself on PATH (~/.local/bin/chatty)
 #
+#   chatty ask "…"    one question, one answer; pipes work (echo … | chatty ask)
+#   chatty chat       streaming REPL in the terminal — /modes, /model, /help inside
+#   chatty sessions   list recent conversations
+#   chatty export <id|n> [file]
+#                     one conversation as markdown
+#
 # Variables: CHATTY_DIR (project directory), CHATTY_NO_OPEN=1 (do not open the browser),
-#            CHATTY_WAIT=<sec> (how long to wait for startup, 300 by default).
+#            CHATTY_WAIT=<sec> (how long to wait for startup, 300 by default),
+#            CHATTY_QUIET=1 (silence the starting chatter — used by ask/chat).
 set -euo pipefail
 
 # --- where the project is: this file may be a symlink from ~/.local/bin ---
@@ -115,12 +122,13 @@ open_browser() {
 }
 
 # wait until the port answers over http; the process dying is an immediate error
+# (all chatter goes to stderr — start_server's stdout is the bare url)
 wait_ready() {
   local port=$1 waited=0 limit=${CHATTY_WAIT:-300}
-  printf '[chatty] waiting for startup'
+  printf '[chatty] waiting for startup' >&2
   while [ "$waited" -lt "$limit" ]; do
     if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/" 2>/dev/null; then
-      printf ' ready\n'
+      printf ' ready\n' >&2
       return 0
     fi
     if ! pid_from_file >/dev/null; then
@@ -129,7 +137,7 @@ wait_ready() {
       rm -f "$PID_FILE"
       return 1
     fi
-    printf '.'
+    printf '.' >&2
     sleep 1
     waited=$((waited + 1))
   done
@@ -137,18 +145,13 @@ wait_ready() {
   return 1
 }
 
-cmd_start() {
-  local pid url port
-  if read -r pid url < <(detect_running); then
-    echo "[chatty] already running (pid $pid) — $url"
-    open_browser "$url"
-    return 0
-  fi
-
+# spawn engine shared by `start` and the cli commands; prints the bare url on
+# stdout, human chatter on stderr. CHATTY_QUIET=1 = headless (ask/chat use this).
+start_server() {
   mkdir -p "$RUN_DIR"
   rm -f "$PID_FILE"
 
-  local want
+  local want port
   want=$(env_port)
   if ! port=$(free_port "$want"); then
     echo "[ERR] no free port in the range $want-$((want + 10))" >&2
@@ -156,10 +159,10 @@ cmd_start() {
   fi
   [ "$port" = "$want" ] || echo "[WARN] port $want is taken by another process — starting on $port" >&2
 
-  url="http://localhost:$port"
+  local url="http://localhost:$port"
   printf '%s\n' "$url" > "$URL_FILE"
   : > "$LOG_FILE"
-  echo "[chatty] starting on $url  (log: .run/chatty.log)"
+  [ "${CHATTY_QUIET:-0}" = "1" ] || echo "[chatty] starting on $url  (log: .run/chatty.log)" >&2
 
   # setsid: the server does not die with the terminal and does not catch its Ctrl+C.
   # the future process writes the pid itself — after exec that is exactly the uvicorn pid.
@@ -171,6 +174,18 @@ cmd_start() {
   ' _ "$PID_FILE" "$ROOT" "$port" "$LOG_FILE" </dev/null >/dev/null 2>&1 &
 
   wait_ready "$port" || exit 1
+  printf '%s\n' "$url"
+}
+
+cmd_start() {
+  local pid url
+  if read -r pid url < <(detect_running); then
+    echo "[chatty] already running (pid $pid) — $url"
+    open_browser "$url"
+    return 0
+  fi
+
+  url=$(start_server)   # status on stderr, the bare url on stdout
 
   echo "[chatty] login password: grep '^AUTH_PASSWORD' .env"
   echo "[chatty] logs: chatty logs   stop: chatty stop"
@@ -221,6 +236,25 @@ cmd_install() {
   esac
 }
 
+# terminal client (ask/chat/sessions/export/models): reuse a running server or
+# autostart one quietly, then hand over to the python package. `python -m` works
+# from $ROOT even without installing; the editable heal just adds the venv's
+# `chatty-cli` script. Bash never sees passwords — python reads .env itself.
+cmd_cli() {
+  local sub=$1; shift
+  local pid url
+  if ! read -r pid url < <(detect_running); then
+    url=$(CHATTY_QUIET=1 start_server)   # a failed start already printed why
+  fi
+  if ! "$ROOT/.venv/bin/python" -c "import chatty_cli" 2>/dev/null; then
+    "$ROOT/.venv/bin/pip" install --quiet -e "$ROOT" || \
+      "$ROOT/.venv/bin/pip" install --quiet rich || true
+  fi
+  export CHATTY_URL="${CHATTY_URL:-$url}"
+  cd "$ROOT"
+  exec "$ROOT/.venv/bin/python" -m chatty_cli "$sub" "$@"
+}
+
 cmd=${1:-start}
 shift 2>/dev/null || true
 
@@ -234,6 +268,8 @@ case "$cmd" in
   logs)            [ -f "$LOG_FILE" ] || { echo "[chatty] no log yet ($LOG_FILE)" >&2; exit 1; }
                    exec tail -f "$LOG_FILE" ;;
   install)         cmd_install ;;
+  ask|chat|sessions|export|models)
+                   cmd_cli "$cmd" "$@" ;;
   -h|--help|help)  usage ;;
   *)               echo "[chatty] unknown command: $cmd" >&2; usage >&2; exit 2 ;;
 esac
